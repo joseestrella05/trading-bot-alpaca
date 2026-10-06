@@ -219,6 +219,7 @@ async def get_signals():
     }
 
 
+@app.post("/api/scan")
 @app.post("/api/scan-now")
 async def trigger_scan_now():
     """Immediately trigger a market scan cycle across monitored tickers."""
