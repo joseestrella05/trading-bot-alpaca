@@ -58,56 +58,58 @@
 <body class="bg-[#090d16] text-gray-200 font-sans min-h-screen flex flex-col antialiased selection:bg-blue-600 selection:text-white">
 
     <!-- TOP NAVIGATION / HEADER -->
-    <header class="border-b border-gray-800 bg-[#0d1322]/90 backdrop-blur sticky top-0 z-50 px-4 lg:px-8 py-3.5">
-        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-4">
+    <header class="border-b border-gray-800/90 bg-[#0c111e]/95 backdrop-blur sticky top-0 z-50 px-4 lg:px-8 py-3">
+        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
             
             <!-- LOGO & BRAND -->
-            <div class="flex items-center space-x-3">
-                <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20">
+            <div class="flex items-center space-x-3 min-w-[240px]">
+                <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20 flex-shrink-0">
                     <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
                     </svg>
                 </div>
                 <div>
                     <div class="flex items-center space-x-2">
-                        <h1 class="text-base font-bold tracking-tight text-white uppercase font-mono">QuantBot Alpaca</h1>
-                        <span id="env-badge" class="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-blue-950 text-blue-400 border border-blue-800">
+                        <h1 class="text-sm sm:text-base font-bold tracking-tight text-white uppercase font-mono">QuantBot Alpaca</h1>
+                        <span id="env-badge" class="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-blue-950/90 text-blue-300 border border-blue-700/60">
                             {{ "PAPER TRADING" if paper_mode else "LIVE REAL MONEY" }}
                         </span>
                     </div>
-                    <p class="text-xs text-gray-400">Swing Trend Following (1D Pullback + Bracket Orders)</p>
+                    <p class="text-[11px] text-gray-400">Swing Trend Following (1D Pullback + Bracket Orders)</p>
                 </div>
             </div>
 
-            <!-- BOT STATUS BADGE & NEXT SCAN -->
-            <div class="hidden sm:flex items-center space-x-4 bg-gray-900/80 px-3.5 py-1.5 rounded-lg border border-gray-800 text-xs">
-                <div class="flex items-center space-x-2">
-                    <span id="bot-status-indicator" class="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse-dot"></span>
-                    <span id="bot-status-text" class="font-mono font-semibold text-emerald-400">ONLINE</span>
+            <!-- STATUS CLUSTER: ONLINE BADGE + NEXT SCAN + REGIME PILL -->
+            <div class="flex items-center flex-wrap gap-2.5">
+                <!-- BOT STATUS & NEXT SCAN -->
+                <div class="flex items-center space-x-3 bg-gray-900/90 px-3 py-1.5 rounded-lg border border-gray-800 text-xs">
+                    <div class="flex items-center space-x-1.5">
+                        <span id="bot-status-indicator" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot"></span>
+                        <span id="bot-status-text" class="font-mono font-bold text-emerald-400 text-xs">ONLINE</span>
+                    </div>
+                    <div class="h-3.5 w-px bg-gray-800"></div>
+                    <div class="text-gray-400 flex items-center space-x-1 text-[11px]">
+                        <span>Próximo Escaneo:</span>
+                        <span id="next-scan-display" class="font-mono text-gray-200 font-medium">3:50 PM EST (L-V)</span>
+                    </div>
                 </div>
-                <div class="h-3 w-px bg-gray-700"></div>
-                <div class="text-gray-400 flex items-center space-x-1.5">
-                    <span>Próximo Escaneo:</span>
-                    <span id="next-scan-display" class="font-mono text-gray-200 font-medium">3:50 PM EST (L-V)</span>
-                </div>
-            </div>
 
-            <!-- ESTADO DE RÉGIMEN ACTUAL -->
-            <div class="hidden md:flex items-center space-x-2.5 bg-gray-900/80 px-3.5 py-1.5 rounded-lg border border-gray-800 text-xs">
-                <span class="text-gray-400 flex items-center space-x-1">
-                    <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-                    </svg>
-                    <span>RÉGIMEN:</span>
-                </span>
-                <span id="regime-status-badge" class="font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800 shadow-sm">
-                    BULL TREND [AGRESIVO (1.25%)]
-                </span>
+                <!-- ESTADO DE RÉGIMEN ACTUAL -->
+                <div class="flex items-center space-x-2 bg-gray-900/90 px-3 py-1.5 rounded-lg border border-gray-800 text-xs shadow-sm">
+                    <span class="text-gray-400 font-medium text-[11px] flex items-center space-x-1">
+                        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                        </svg>
+                        <span class="uppercase tracking-wider font-semibold text-gray-400">RÉGIMEN:</span>
+                    </span>
+                    <span id="regime-status-badge" class="font-mono font-bold px-2 py-0.5 rounded-md text-xs whitespace-nowrap bg-emerald-950/60 text-emerald-300 border border-emerald-700/60 shadow-sm">
+                        BULL TREND [AGRESIVO (1.25%)]
+                    </span>
+                </div>
             </div>
 
             <!-- CONTROLS: SCAN NOW & TOGGLE BOT -->
-            <div class="flex items-center space-x-3">
-                
+            <div class="flex items-center space-x-2.5">
                 <!-- SCAN NOW BUTTON -->
                 <button id="btn-scan-now" onclick="triggerManualScan()" class="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow-md shadow-blue-600/20 transition disabled:opacity-50 disabled:cursor-not-allowed">
                     <svg id="scan-spinner" class="hidden w-3.5 h-3.5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
@@ -121,7 +123,7 @@
                 </button>
 
                 <!-- TOGGLE BOT SWITCH -->
-                <button id="btn-toggle-bot" onclick="toggleBotState()" class="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-gray-800 hover:bg-gray-700 active:bg-gray-900 border border-gray-700 text-xs font-medium text-gray-200 transition">
+                <button id="btn-toggle-bot" onclick="toggleBotState()" class="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-gray-800/90 hover:bg-gray-700 active:bg-gray-900 border border-gray-700 text-xs font-medium text-gray-200 transition">
                     <span id="toggle-circle" class="w-2 h-2 rounded-full bg-emerald-400"></span>
                     <span id="toggle-label">Pausar Bot</span>
                 </button>
@@ -256,26 +258,26 @@
                 </div>
             </div>
 
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs text-gray-300">
-                    <thead class="bg-[#0c121e] text-[11px] uppercase font-mono tracking-wider text-gray-400 border-b border-gray-800">
+            <div class="overflow-x-auto rounded-b-xl border-t border-gray-800/80">
+                <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
+                    <thead class="bg-[#0b101c] text-[11px] uppercase font-mono tracking-wider text-gray-400 border-b border-gray-800">
                         <tr>
-                            <th class="py-3 px-4 font-semibold">Ticker</th>
-                            <th class="py-3 px-4 font-semibold text-right">Precio 1D</th>
-                            <th class="py-3 px-4 font-semibold text-center">RSI(14)</th>
-                            <th class="py-3 px-4 font-semibold text-right">EMA(20)</th>
-                            <th class="py-3 px-4 font-semibold text-right">EMA(50)</th>
-                            <th class="py-3 px-4 font-semibold text-right">EMA(200)</th>
-                            <th class="py-3 px-4 font-semibold text-right">ATR(14)</th>
-                            <th class="py-3 px-3 font-semibold text-center">ML PROB</th>
-                            <th class="py-3 px-3 font-semibold text-center">NEWS / EARNINGS</th>
-                            <th class="py-3 px-3 font-semibold text-center">RÉGIMEN</th>
-                            <th class="py-3 px-4 font-semibold text-center">Señal</th>
-                            <th class="py-3 px-4 font-semibold">Diagnóstico Cuantitativo</th>
-                            <th class="py-3 px-4 font-semibold text-center">Acción / Orden</th>
+                            <th class="py-3 px-3.5 font-semibold text-left">Ticker</th>
+                            <th class="py-3 px-3 font-semibold text-right">Precio 1D</th>
+                            <th class="py-3 px-2.5 font-semibold text-center">RSI(14)</th>
+                            <th class="py-3 px-3 font-semibold text-right">EMA(20)</th>
+                            <th class="py-3 px-3 font-semibold text-right">EMA(50)</th>
+                            <th class="py-3 px-3 font-semibold text-right">EMA(200)</th>
+                            <th class="py-3 px-3 font-semibold text-right">ATR(14)</th>
+                            <th class="py-3 px-3 font-semibold text-center min-w-[85px]">ML PROB</th>
+                            <th class="py-3 px-3 font-semibold text-center min-w-[125px]">NEWS / EARNINGS</th>
+                            <th class="py-3 px-3 font-semibold text-center min-w-[110px]">RÉGIMEN</th>
+                            <th class="py-3 px-3 font-semibold text-center min-w-[70px]">Señal</th>
+                            <th class="py-3 px-3.5 font-semibold text-left min-w-[200px]">Diagnóstico Cuantitativo</th>
+                            <th class="py-3 px-3 font-semibold text-center min-w-[110px]">Acción / Orden</th>
                         </tr>
                     </thead>
-                    <tbody id="radar-table-body" class="divide-y divide-gray-800/60 font-mono">
+                    <tbody id="radar-table-body" class="divide-y divide-gray-800/60 font-mono text-xs">
                         <tr>
                             <td colspan="13" class="py-8 text-center text-gray-500 font-sans">
                                 Haz clic en <span class="text-blue-400 font-semibold">'Escanear Ahora'</span> para evaluar los tickers en tiempo real.
@@ -517,27 +519,27 @@
             for (const item of results) {
                 const isBuy = item.signal === 'BUY';
                 const signalBadge = isBuy
-                    ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">BUY</span>'
-                    : '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-gray-800 text-gray-400">HOLD</span>';
+                    ? '<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-bold whitespace-nowrap bg-emerald-950/80 text-emerald-400 border border-emerald-600/60 shadow-sm">BUY</span>'
+                    : '<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-800/90 text-gray-400 border border-gray-700/50">HOLD</span>';
 
                 // RSI color code
                 let rsiColor = 'text-gray-300';
                 if (item.rsi <= 40) rsiColor = 'text-emerald-400 font-semibold';
                 else if (item.rsi >= 70) rsiColor = 'text-rose-400 font-semibold';
 
-                // ML Probability badge (green when >= 60.0%, gray otherwise)
-                let mlBadge = '<span class="text-gray-500 font-mono">-</span>';
+                // ML Probability badge (crisp text-slate-100 font-mono font-medium, or text-emerald-400 font-semibold when >= 60%)
+                let mlBadge = '<span class="text-slate-400 font-mono text-xs">-</span>';
                 if (item.ml_prob !== undefined && item.ml_prob !== null) {
                     const probVal = parseFloat(item.ml_prob).toFixed(1);
                     if (item.ml_prob >= 60.0) {
-                        mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">${probVal}%</span>`;
+                        mlBadge = `<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold font-mono text-emerald-400 bg-emerald-950/70 border border-emerald-600/60 shadow-sm">${probVal}%</span>`;
                     } else {
-                        mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono text-gray-400 bg-gray-800">${probVal}%</span>`;
+                        mlBadge = `<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-mono font-medium text-slate-100 bg-slate-800/80 border border-slate-700/60">${probVal}%</span>`;
                     }
                 }
 
-                // News & Earnings badge ('SAFE' or 'EARNINGS IN 24H' / 'RISK')
-                let newsBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800" title="News & Earnings Safe">SAFE</span>';
+                // News & Earnings badge ('SAFE' or 'MACRO RISK' / 'EARNINGS')
+                let newsBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-emerald-950/60 border border-emerald-700/50 text-emerald-300" title="News & Earnings Safe">SAFE</span>';
                 if (item.news_safe === false) {
                     let riskLabel = 'RISK';
                     const reason = (item.news_reason || '').toLowerCase();
@@ -547,48 +549,48 @@
                         riskLabel = 'EARNINGS IN 2D';
                     } else if (reason.includes('earnings')) {
                         riskLabel = 'EARNINGS';
-                    } else if (reason.includes('macro')) {
+                    } else if (reason.includes('macro') || reason.includes('fomc') || reason.includes('cpi')) {
                         riskLabel = 'MACRO RISK';
                     }
-                    newsBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="${item.news_reason || 'Risk'}">${riskLabel}</span>`;
+                    newsBadge = `<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-rose-950/60 border border-rose-700/50 text-rose-300" title="${item.news_reason || 'Risk'}">${riskLabel}</span>`;
                 }
 
                 // Market Regime badge (BULL_TREND, RANGE_CHOP, DEFENSIVE)
-                let regimeBadge = '<span class="text-gray-500 font-mono text-[10px]">-</span>';
+                let regimeBadge = '<span class="text-slate-400 font-mono text-xs">-</span>';
                 if (item.regime) {
                     if (item.regime === 'BULL_TREND') {
-                        regimeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800" title="BULL TREND: 1.25% Risk | 3:1 RR">BULL TREND</span>';
+                        regimeBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-emerald-950/50 border border-emerald-600/40 text-emerald-300" title="BULL TREND: 1.25% Risk | 3:1 RR">BULL TREND</span>';
                     } else if (item.regime === 'RANGE_CHOP') {
-                        regimeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800" title="RANGE CHOP: 0.50% Risk | 1.5:1 RR">RANGE CHOP</span>';
+                        regimeBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-amber-950/50 border border-amber-600/40 text-amber-300" title="RANGE CHOP: 0.50% Risk | 1.5:1 RR">RANGE CHOP</span>';
                     } else {
-                        regimeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="DEFENSIVE: Entries Halted">DEFENSIVE</span>';
+                        regimeBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-rose-950/50 border border-rose-600/40 text-rose-300" title="DEFENSIVE: Entries Halted">DEFENSIVE</span>';
                     }
                 }
 
                 let actionBadge = '';
                 if (item.executed) {
-                    actionBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900 text-emerald-300 border border-emerald-700">ORDEN ENVIADA (${item.shares} sh)</span>`;
+                    actionBadge = `<span class="inline-block px-2 py-0.5 rounded-md text-[11px] font-bold whitespace-nowrap bg-emerald-900/80 text-emerald-300 border border-emerald-700">ORDEN ENVIADA (${item.shares} sh)</span>`;
                 } else if (item.status === 'REJECTED') {
-                    actionBadge = `<span class="px-2 py-0.5 rounded text-[10px] bg-rose-950 text-rose-400 border border-rose-800">RECHAZADA</span>`;
+                    actionBadge = `<span class="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium whitespace-nowrap bg-rose-950/60 text-rose-300 border border-rose-800/60">RECHAZADA</span>`;
                 } else {
-                    actionBadge = `<span class="text-gray-500 text-[10px]">Sin acción</span>`;
+                    actionBadge = `<span class="text-gray-500 text-xs whitespace-nowrap">Sin acción</span>`;
                 }
 
                 html += `
                     <tr class="hover:bg-gray-800/40 transition">
-                        <td class="py-3 px-4 font-bold text-white">${item.symbol}</td>
-                        <td class="py-3 px-4 text-right text-gray-200">${fmtUsd(item.price)}</td>
-                        <td class="py-3 px-4 text-center ${rsiColor}">${item.rsi !== undefined ? item.rsi : '-'}</td>
-                        <td class="py-3 px-4 text-right text-gray-400">${item.ema_20 ? fmtUsd(item.ema_20) : '-'}</td>
-                        <td class="py-3 px-4 text-right text-gray-400">${item.ema_50 ? fmtUsd(item.ema_50) : '-'}</td>
-                        <td class="py-3 px-4 text-right text-gray-400">${item.ema_200 ? fmtUsd(item.ema_200) : '-'}</td>
-                        <td class="py-3 px-4 text-right text-gray-400">${item.atr ? fmtUsd(item.atr) : '-'}</td>
-                        <td class="py-3 px-3 text-center">${mlBadge}</td>
-                        <td class="py-3 px-3 text-center">${newsBadge}</td>
-                        <td class="py-3 px-3 text-center">${regimeBadge}</td>
-                        <td class="py-3 px-4 text-center">${signalBadge}</td>
-                        <td class="py-3 px-4 font-sans text-xs text-gray-300 max-w-xs truncate" title="${item.reason || ''}">${item.reason || '-'}</td>
-                        <td class="py-3 px-4 text-center">${actionBadge}</td>
+                        <td class="py-2.5 px-3.5 font-bold text-white">${item.symbol}</td>
+                        <td class="py-2.5 px-3 text-right text-slate-100 font-mono">${fmtUsd(item.price)}</td>
+                        <td class="py-2.5 px-2.5 text-center font-mono ${rsiColor}">${item.rsi !== undefined ? item.rsi : '-'}</td>
+                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.ema_20 ? fmtUsd(item.ema_20) : '-'}</td>
+                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.ema_50 ? fmtUsd(item.ema_50) : '-'}</td>
+                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.ema_200 ? fmtUsd(item.ema_200) : '-'}</td>
+                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.atr ? fmtUsd(item.atr) : '-'}</td>
+                        <td class="py-2.5 px-3 text-center min-w-[85px] whitespace-nowrap">${mlBadge}</td>
+                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[125px]">${newsBadge}</td>
+                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[110px]">${regimeBadge}</td>
+                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[70px]">${signalBadge}</td>
+                        <td class="py-2.5 px-3.5 font-sans text-xs text-gray-300 max-w-sm truncate whitespace-nowrap" title="${item.reason || ''}">${item.reason || '-'}</td>
+                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[110px]">${actionBadge}</td>
                     </tr>
                 `;
             }
