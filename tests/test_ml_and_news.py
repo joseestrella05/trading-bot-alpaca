@@ -1,10 +1,14 @@
 """Unit tests for ML Predictor, News & Earnings Filter, and Integrated Strategy."""
 
 from datetime import datetime, date, timedelta
+import os
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import SignalType
 from news_filter import NewsFilter, NewsFilterResult

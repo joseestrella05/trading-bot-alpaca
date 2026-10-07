@@ -134,7 +134,7 @@ app.add_middleware(
 # ---------------------------------------------------------------------------
 # Dashboard Route
 # ---------------------------------------------------------------------------
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def serve_dashboard(request: Request):
     """Render the primary Bloomberg/TradingView style dark dashboard."""
     return templates.TemplateResponse(

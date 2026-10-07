@@ -254,8 +254,8 @@
                             <th class="py-3 px-4 font-semibold text-right">EMA(50)</th>
                             <th class="py-3 px-4 font-semibold text-right">EMA(200)</th>
                             <th class="py-3 px-4 font-semibold text-right">ATR(14)</th>
-                            <th class="py-3 px-3 font-semibold text-center">ML Prob</th>
-                            <th class="py-3 px-3 font-semibold text-center">Noticias / Earnings</th>
+                            <th class="py-3 px-3 font-semibold text-center">ML PROB</th>
+                            <th class="py-3 px-3 font-semibold text-center">NEWS / EARNINGS</th>
                             <th class="py-3 px-4 font-semibold text-center">Señal</th>
                             <th class="py-3 px-4 font-semibold">Diagnóstico Cuantitativo</th>
                             <th class="py-3 px-4 font-semibold text-center">Acción / Orden</th>
@@ -480,21 +480,32 @@
                 if (item.rsi <= 40) rsiColor = 'text-emerald-400 font-semibold';
                 else if (item.rsi >= 70) rsiColor = 'text-rose-400 font-semibold';
 
-                // ML Probability badge
+                // ML Probability badge (green when >= 60.0%, gray otherwise)
                 let mlBadge = '<span class="text-gray-500 font-mono">-</span>';
                 if (item.ml_prob !== undefined && item.ml_prob !== null) {
-                    const probVal = Math.round(item.ml_prob);
-                    if (probVal >= 60) {
-                        mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950 text-indigo-300 border border-indigo-700">${probVal}%</span>`;
+                    const probVal = parseFloat(item.ml_prob).toFixed(1);
+                    if (item.ml_prob >= 60.0) {
+                        mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800">${probVal}%</span>`;
                     } else {
                         mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono text-gray-400 bg-gray-800">${probVal}%</span>`;
                     }
                 }
 
-                // News & Earnings badge
+                // News & Earnings badge ('SAFE' or 'EARNINGS IN 24H' / 'RISK')
                 let newsBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800" title="News & Earnings Safe">SAFE</span>';
                 if (item.news_safe === false) {
-                    newsBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="${item.news_reason || 'Risk'}">RISK</span>`;
+                    let riskLabel = 'RISK';
+                    const reason = (item.news_reason || '').toLowerCase();
+                    if (reason.includes('in 0d') || reason.includes('in 1d') || reason.includes('24h') || reason.includes('tomorrow')) {
+                        riskLabel = 'EARNINGS IN 24H';
+                    } else if (reason.includes('in 2d') || reason.includes('in 3d')) {
+                        riskLabel = 'EARNINGS IN 2D';
+                    } else if (reason.includes('earnings')) {
+                        riskLabel = 'EARNINGS';
+                    } else if (reason.includes('macro')) {
+                        riskLabel = 'MACRO RISK';
+                    }
+                    newsBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="${item.news_reason || 'Risk'}">${riskLabel}</span>`;
                 }
 
                 let actionBadge = '';

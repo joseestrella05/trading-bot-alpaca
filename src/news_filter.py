@@ -11,7 +11,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime, date, timedelta, timezone
+import json
 import logging
+import os
 from typing import Any, Dict, List, Optional
 import httpx
 import yfinance as yf
@@ -19,6 +21,7 @@ import yfinance as yf
 logger = logging.getLogger("NewsFilter")
 
 FOREX_FACTORY_CALENDAR_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+DISK_MACRO_CACHE_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "models", "macro_calendar_cache.json")
 
 
 @dataclass(frozen=True)
@@ -74,6 +77,32 @@ class NewsFilter:
             "XLP", "XLU", "XLB", "XLC", "VNQ", "VTI", "VOO", "TLT", "EEM", "EFA"
         }
 
+    def _load_disk_cache(self) -> List[Dict[str, Any]]:
+        """Load fallback macro events from disk if available."""
+        if os.path.exists(DISK_MACRO_CACHE_PATH):
+            try:
+                with open(DISK_MACRO_CACHE_PATH, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    events = []
+                    for item in data:
+                        country = str(item.get("country", "")).strip().upper()
+                        impact = str(item.get("impact", "")).strip().lower()
+                        if country == "USD" and impact in ("high", "critical"):
+                            events.append(item)
+                    return events
+            except Exception as e:
+                logger.debug("Could not read disk macro cache: %s", e)
+        return []
+
+    def _save_disk_cache(self, raw_data: Any) -> None:
+        """Save raw macro events to disk cache."""
+        try:
+            os.makedirs(os.path.dirname(DISK_MACRO_CACHE_PATH), exist_ok=True)
+            with open(DISK_MACRO_CACHE_PATH, "w", encoding="utf-8") as f:
+                json.dump(raw_data, f, indent=2)
+        except Exception as e:
+            logger.debug("Could not save disk macro cache: %s", e)
+
     def fetch_macro_calendar(self) -> List[Dict[str, Any]]:
         """Fetch weekly calendar from Forex Factory public feed with caching.
 
@@ -87,13 +116,15 @@ class NewsFilter:
         ):
             return self._macro_events_cache
 
+        self._macro_cache_time = now_utc
         events: List[Dict[str, Any]] = []
         try:
-            headers = {"User-Agent": "Mozilla/5.0 (compatible; TradingBot/1.0)"}
+            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
             with httpx.Client(timeout=10.0, headers=headers) as client:
                 resp = client.get(FOREX_FACTORY_CALENDAR_URL)
                 if resp.status_code == 200:
                     raw_events = resp.json()
+                    self._save_disk_cache(raw_events)
                     for item in raw_events:
                         country = str(item.get("country", "")).strip().upper()
                         impact = str(item.get("impact", "")).strip().lower()
@@ -101,12 +132,61 @@ class NewsFilter:
                         if country == "USD" and impact in ("high", "critical"):
                             events.append(item)
                     self._macro_events_cache = events
-                    self._macro_cache_time = now_utc
                     logger.debug("Fetched %d high-impact USD macro events from Forex Factory.", len(events))
+                    return self._macro_events_cache
                 else:
                     logger.warning("Forex Factory feed returned HTTP %s. Using cached events.", resp.status_code)
         except Exception as exc:
             logger.warning("Failed to fetch Forex Factory calendar (%s). Proceeding with cache.", exc)
+
+        # Fallback to disk cache if in-memory cache is empty
+        if not self._macro_events_cache:
+            disk_events = self._load_disk_cache()
+            if disk_events:
+                self._macro_events_cache = disk_events
+                logger.info("Loaded %d high-impact USD events from disk cache.", len(disk_events))
+
+        return self._macro_events_cache
+
+    async def fetch_macro_calendar_async(self) -> List[Dict[str, Any]]:
+        """Asynchronously fetch weekly calendar from Forex Factory public feed with caching.
+
+        Returns:
+            List of high-impact USD events.
+        """
+        now_utc = datetime.now(timezone.utc)
+        if (
+            self._macro_cache_time is not None
+            and (now_utc - self._macro_cache_time).total_seconds() < self.cache_ttl_seconds
+        ):
+            return self._macro_events_cache
+
+        self._macro_cache_time = now_utc
+        events: List[Dict[str, Any]] = []
+        try:
+            headers = {"User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"}
+            async with httpx.AsyncClient(timeout=10.0, headers=headers) as client:
+                resp = await client.get(FOREX_FACTORY_CALENDAR_URL)
+                if resp.status_code == 200:
+                    raw_events = resp.json()
+                    self._save_disk_cache(raw_events)
+                    for item in raw_events:
+                        country = str(item.get("country", "")).strip().upper()
+                        impact = str(item.get("impact", "")).strip().lower()
+                        if country == "USD" and impact in ("high", "critical"):
+                            events.append(item)
+                    self._macro_events_cache = events
+                    logger.debug("Fetched %d high-impact USD macro events from Forex Factory async.", len(events))
+                    return self._macro_events_cache
+                else:
+                    logger.warning("Forex Factory feed returned HTTP %s async. Using cached events.", resp.status_code)
+        except Exception as exc:
+            logger.warning("Failed to fetch Forex Factory calendar async (%s). Proceeding with cache.", exc)
+
+        if not self._macro_events_cache:
+            disk_events = self._load_disk_cache()
+            if disk_events:
+                self._macro_events_cache = disk_events
 
         return self._macro_events_cache
 
@@ -263,3 +343,8 @@ class NewsFilter:
             imminent_macro_event=macro_desc,
             reason=reason_str,
         )
+
+    async def evaluate_async(self, symbol: str) -> NewsFilterResult:
+        """Asynchronously run macro calendar and earnings checks on target symbol."""
+        await self.fetch_macro_calendar_async()
+        return self.evaluate(symbol)
