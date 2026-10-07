@@ -21,6 +21,8 @@ from execution import AlpacaExecutionHandler
 from models import AccountState, ExecutionResult, PositionSize, SignalType, TradingSignal
 from risk_manager import RiskManager
 from strategy import SwingTrendFollowingStrategy
+from news_filter import NewsFilter
+from ml_model import StockMLPredictor
 
 
 def setup_logger(log_level_str: str) -> logging.Logger:
@@ -48,7 +50,24 @@ class SwingTradingBot:
 
         self.logger.info("Initializing Swing Trading Bot...")
         self.data_provider = AlpacaDataProvider(config.alpaca)
-        self.strategy = SwingTrendFollowingStrategy(config.strategy)
+
+        # 1. Initialize News & Earnings filter
+        self.news_filter = NewsFilter()
+
+        # 2. Initialize Machine Learning Random Forest predictor
+        self.ml_predictor = StockMLPredictor()
+        try:
+            self.ml_predictor.ensure_model_ready(self.data_provider)
+        except Exception as exc:
+            self.logger.warning("Could not auto-train or verify ML model on startup: %s", exc)
+
+        # 3. Initialize Strategy with News and ML integration
+        self.strategy = SwingTrendFollowingStrategy(
+            config.strategy,
+            news_filter=self.news_filter,
+            ml_predictor=self.ml_predictor,
+        )
+
         self.risk_manager = RiskManager(config.risk)
         self.execution_handler = AlpacaExecutionHandler(
             alpaca_config=config.alpaca,
@@ -224,6 +243,7 @@ class SwingTradingBot:
             for sym in scan_symbols:
                 try:
                     signal, pos_size, exec_res = self.scan_symbol(sym, account, active_symbols)
+                    ml_prob_pct = round(signal.ml_probability * 100, 1) if signal.ml_probability is not None else None
                     results_summary.append({
                         "symbol": sym,
                         "signal": signal.signal_type.value,
@@ -233,6 +253,9 @@ class SwingTradingBot:
                         "ema_50": round(signal.ema_50, 2),
                         "ema_200": round(signal.ema_200, 2),
                         "atr": round(signal.atr_14, 2),
+                        "ml_prob": ml_prob_pct,
+                        "news_safe": signal.news_safe,
+                        "news_reason": signal.news_reason,
                         "shares": int(pos_size.shares) if pos_size else 0,
                         "stop_loss": pos_size.stop_loss_price if pos_size else None,
                         "take_profit": pos_size.take_profit_price if pos_size else None,
@@ -250,17 +273,21 @@ class SwingTradingBot:
 
             # 4. Print Summary Report
             self.logger.info("=" * 60)
-            self.logger.info("SCAN COMPLETE - SUMMARY REPORT")
+            self.logger.info("SCAN COMPLETE - SUMMARY REPORT (TECH + NEWS + ML)")
             self.logger.info("=" * 60)
             for item in results_summary:
                 status_tag = "[ORDER SENT]" if item["executed"] else f"[{item['status']}]"
+                ml_str = f"{int(round(item['ml_prob']))}%" if item.get("ml_prob") is not None else "--"
+                news_str = "SAFE" if item.get("news_safe") else "RISK"
                 self.logger.info(
-                    "%-6s | Signal: %-4s | Shares: %-3d | %-12s | %s",
+                    "%-6s | %-4s | ML: %-4s | News: %-4s | Shares: %-3d | %-12s | %s",
                     item["symbol"],
                     item["signal"],
+                    ml_str,
+                    news_str,
                     int(item["shares"]),
                     status_tag,
-                    item["reason"][:75],
+                    item["reason"][:60],
                 )
             self.logger.info("=" * 60)
 

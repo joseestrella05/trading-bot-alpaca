@@ -28,13 +28,22 @@ logger = logging.getLogger(__name__)
 class SwingTrendFollowingStrategy:
     """Evaluates swing trend-following pullback setups on daily bars."""
 
-    def __init__(self, config: Optional[StrategyConfig] = None) -> None:
-        """Initialize strategy with configurable hyper-parameters.
+    def __init__(
+        self,
+        config: Optional[StrategyConfig] = None,
+        news_filter: Optional[Any] = None,
+        ml_predictor: Optional[Any] = None,
+    ) -> None:
+        """Initialize strategy with configurable hyper-parameters and filters.
 
         Args:
             config: Strategy configuration settings.
+            news_filter: Optional NewsFilter instance for macro and earnings checks.
+            ml_predictor: Optional StockMLPredictor instance for Random Forest confirmation.
         """
         self.config = config or StrategyConfig()
+        self.news_filter = news_filter
+        self.ml_predictor = ml_predictor
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Compute EMA(20, 50, 200), Wilder's ATR(14), and Wilder's RSI(14).
@@ -130,6 +139,31 @@ class SwingTrendFollowingStrategy:
         prev_rsi = float(curr["prev_rsi"])
 
         # -------------------------------------------------------------
+        # Evaluate ML and News Filter Upfront for Comprehensive Metrics
+        # -------------------------------------------------------------
+        ml_prob: Optional[float] = None
+        ml_approved: bool = True
+        ml_reason: str = "ML Neutral"
+        if self.ml_predictor is not None:
+            try:
+                ml_res = self.ml_predictor.predict(symbol, indicators_df)
+                ml_prob = ml_res.probability
+                ml_approved = ml_res.is_approved
+                ml_reason = ml_res.reason
+            except Exception as exc:
+                logger.warning("ML prediction failed for %s: %s", symbol, exc)
+
+        news_safe: bool = True
+        news_reason: str = "News Safe"
+        if self.news_filter is not None:
+            try:
+                news_res = self.news_filter.evaluate(symbol)
+                news_safe = news_res.safe
+                news_reason = news_res.reason
+            except Exception as exc:
+                logger.warning("News evaluation failed for %s: %s", symbol, exc)
+
+        # -------------------------------------------------------------
         # 1. Filtro de Tendencia (Macro Trend Alignment)
         # Price > EMA(200) AND EMA(50) > EMA(200)
         # -------------------------------------------------------------
@@ -155,6 +189,9 @@ class SwingTrendFollowingStrategy:
                 atr_14=atr_14,
                 prev_high=prev_high,
                 reason=f"Trend filter failed: {'; '.join(reasons)}",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
             )
 
         # -------------------------------------------------------------
@@ -187,6 +224,9 @@ class SwingTrendFollowingStrategy:
                 atr_14=atr_14,
                 prev_high=prev_high,
                 reason=f"No recent pullback to EMA20. Min low (${min_recent_low:.2f}) > EMA20 (${ema_20:.2f}) + {self.config.pullback_tolerance_pct*100:.1f}%",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
             )
 
         # -------------------------------------------------------------
@@ -208,6 +248,9 @@ class SwingTrendFollowingStrategy:
                 atr_14=atr_14,
                 prev_high=prev_high,
                 reason=f"Trigger failed: Close (${close_price:.2f}) did not exceed previous high (${prev_high:.2f})",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
             )
 
         # -------------------------------------------------------------
@@ -244,6 +287,54 @@ class SwingTrendFollowingStrategy:
                 atr_14=atr_14,
                 prev_high=prev_high,
                 reason=f"RSI bounce condition failed: {'; '.join(reasons)}",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
+            )
+
+        # -------------------------------------------------------------
+        # 5. Filtro de Noticias & Calendario de Earnings
+        # -------------------------------------------------------------
+        if not news_safe:
+            return TradingSignal(
+                symbol=symbol,
+                signal_type=SignalType.HOLD,
+                timestamp=timestamp,
+                close_price=close_price,
+                entry_price=close_price,
+                ema_20=ema_20,
+                ema_50=ema_50,
+                ema_200=ema_200,
+                rsi_14=rsi_14,
+                atr_14=atr_14,
+                prev_high=prev_high,
+                reason=f"Technical OK | {news_reason}",
+                ml_probability=ml_prob,
+                news_safe=False,
+                news_reason=news_reason,
+            )
+
+        # -------------------------------------------------------------
+        # 6. Filtro de Machine Learning (Random Forest >= 60%)
+        # -------------------------------------------------------------
+        if not ml_approved:
+            prob_pct = int(round((ml_prob or 0.0) * 100))
+            return TradingSignal(
+                symbol=symbol,
+                signal_type=SignalType.HOLD,
+                timestamp=timestamp,
+                close_price=close_price,
+                entry_price=close_price,
+                ema_20=ema_20,
+                ema_50=ema_50,
+                ema_200=ema_200,
+                rsi_14=rsi_14,
+                atr_14=atr_14,
+                prev_high=prev_high,
+                reason=f"Technical OK | ML Rejected ({prob_pct}%)",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
             )
 
         # -------------------------------------------------------------
@@ -255,6 +346,7 @@ class SwingTrendFollowingStrategy:
             "dist_to_ema20_pct": (close_price - ema_20) / ema_20,
         }
 
+        prob_pct = int(round((ml_prob or 0.0) * 100))
         return TradingSignal(
             symbol=symbol,
             signal_type=SignalType.BUY,
@@ -268,9 +360,11 @@ class SwingTrendFollowingStrategy:
             atr_14=atr_14,
             prev_high=prev_high,
             reason=(
-                f"BUY setup confirmed: Trend aligned (Close > EMA200, EMA50 > EMA200), "
-                f"pullback to EMA20 tested, breakout above prior high (${prev_high:.2f}), "
-                f"and RSI({rsi_14:.1f}) bounced upward over 40."
+                f"BUY setup confirmed: Technical setup valid, News safe, "
+                f"and ML Confirmed ({prob_pct}%)."
             ),
             metrics=metrics,
+            ml_probability=ml_prob,
+            news_safe=True,
+            news_reason=news_reason,
         )

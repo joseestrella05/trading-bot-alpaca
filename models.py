@@ -51,6 +51,9 @@ class TradingSignal:
     prev_high: float
     reason: str
     metrics: Dict[str, Any] = field(default_factory=dict)
+    ml_probability: Optional[float] = None
+    news_safe: bool = True
+    news_reason: Optional[str] = None
 
 
 @dataclass(frozen=True)

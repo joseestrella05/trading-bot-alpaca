@@ -254,6 +254,8 @@
                             <th class="py-3 px-4 font-semibold text-right">EMA(50)</th>
                             <th class="py-3 px-4 font-semibold text-right">EMA(200)</th>
                             <th class="py-3 px-4 font-semibold text-right">ATR(14)</th>
+                            <th class="py-3 px-3 font-semibold text-center">ML Prob</th>
+                            <th class="py-3 px-3 font-semibold text-center">Noticias / Earnings</th>
                             <th class="py-3 px-4 font-semibold text-center">Señal</th>
                             <th class="py-3 px-4 font-semibold">Diagnóstico Cuantitativo</th>
                             <th class="py-3 px-4 font-semibold text-center">Acción / Orden</th>
@@ -261,7 +263,7 @@
                     </thead>
                     <tbody id="radar-table-body" class="divide-y divide-gray-800/60 font-mono">
                         <tr>
-                            <td colspan="10" class="py-8 text-center text-gray-500 font-sans">
+                            <td colspan="12" class="py-8 text-center text-gray-500 font-sans">
                                 Haz clic en <span class="text-blue-400 font-semibold">'Escanear Ahora'</span> para evaluar los tickers en tiempo real.
                             </td>
                         </tr>
@@ -478,6 +480,23 @@
                 if (item.rsi <= 40) rsiColor = 'text-emerald-400 font-semibold';
                 else if (item.rsi >= 70) rsiColor = 'text-rose-400 font-semibold';
 
+                // ML Probability badge
+                let mlBadge = '<span class="text-gray-500 font-mono">-</span>';
+                if (item.ml_prob !== undefined && item.ml_prob !== null) {
+                    const probVal = Math.round(item.ml_prob);
+                    if (probVal >= 60) {
+                        mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-indigo-950 text-indigo-300 border border-indigo-700">${probVal}%</span>`;
+                    } else {
+                        mlBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-mono text-gray-400 bg-gray-800">${probVal}%</span>`;
+                    }
+                }
+
+                // News & Earnings badge
+                let newsBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-950 text-emerald-400 border border-emerald-800" title="News & Earnings Safe">SAFE</span>';
+                if (item.news_safe === false) {
+                    newsBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="${item.news_reason || 'Risk'}">RISK</span>`;
+                }
+
                 let actionBadge = '';
                 if (item.executed) {
                     actionBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900 text-emerald-300 border border-emerald-700">ORDEN ENVIADA (${item.shares} sh)</span>`;
@@ -496,6 +515,8 @@
                         <td class="py-3 px-4 text-right text-gray-400">${item.ema_50 ? fmtUsd(item.ema_50) : '-'}</td>
                         <td class="py-3 px-4 text-right text-gray-400">${item.ema_200 ? fmtUsd(item.ema_200) : '-'}</td>
                         <td class="py-3 px-4 text-right text-gray-400">${item.atr ? fmtUsd(item.atr) : '-'}</td>
+                        <td class="py-3 px-3 text-center">${mlBadge}</td>
+                        <td class="py-3 px-3 text-center">${newsBadge}</td>
                         <td class="py-3 px-4 text-center">${signalBadge}</td>
                         <td class="py-3 px-4 font-sans text-xs text-gray-300 max-w-xs truncate" title="${item.reason || ''}">${item.reason || '-'}</td>
                         <td class="py-3 px-4 text-center">${actionBadge}</td>
