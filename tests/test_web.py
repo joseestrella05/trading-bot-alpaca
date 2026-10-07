@@ -70,6 +70,14 @@ class TestWebDashboard(unittest.TestCase):
         job_ids = [j["id"] for j in data["jobs"]]
         self.assertIn("market_preclose_scan", job_ids)
 
+    def test_api_signals(self):
+        resp = self.client.get("/api/signals")
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertIn("signals_count", data)
+        self.assertIn("results", data)
+        self.assertIn("market_regime", data)
+
 
 if __name__ == "__main__":
     unittest.main()

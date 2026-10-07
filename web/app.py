@@ -100,6 +100,17 @@ async def lifespan(app: FastAPI):
 
     logger.info("Bot and Scheduler online. Next scan: %s", scheduler_instance.get_next_run_time())
 
+    # Trigger initial scan in background thread immediately on startup without blocking server launch
+    async def _initial_background_scan():
+        logger.info("Triggering initial background scan on startup...")
+        try:
+            await asyncio.to_thread(bot_instance.run_scan)
+            logger.info("Initial background scan completed.")
+        except Exception as exc:
+            logger.error("Initial background scan error: %s", exc, exc_info=True)
+
+    asyncio.create_task(_initial_background_scan())
+
     yield
 
     # Teardown

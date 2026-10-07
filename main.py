@@ -10,10 +10,14 @@ import warnings
 warnings.filterwarnings("ignore", message=".*urllib3 v2 only supports OpenSSL.*")
 
 import argparse
+import json
 import logging
+from pathlib import Path
 import sys
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
+
+CACHE_FILE_PATH = Path(__file__).resolve().parent / "data" / "last_scan_cache.json"
 
 from config import AppConfig, load_config
 from data_provider import AlpacaDataProvider
@@ -93,6 +97,60 @@ class SwingTradingBot:
         self.is_scanning: bool = False
         self.last_scan_time: Optional[datetime] = None
         self.last_results: List[Dict[str, Any]] = []
+        self._cached_regime_info: Optional[Dict[str, Any]] = None
+
+        # Load persisted scan cache from disk to avoid empty dashboard on startup
+        self._load_cached_results()
+
+    def _load_cached_results(self) -> None:
+        """Load previously persisted scan results and metadata from local JSON cache."""
+        if not CACHE_FILE_PATH.exists():
+            return
+        try:
+            with open(CACHE_FILE_PATH, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            cached_results = data.get("results", [])
+            if cached_results:
+                self.last_results = cached_results
+                scan_time_str = data.get("scan_time")
+                if scan_time_str:
+                    from datetime import datetime
+                    try:
+                        self.last_scan_time = datetime.fromisoformat(scan_time_str)
+                    except Exception:
+                        pass
+                cached_regime = data.get("market_regime")
+                if cached_regime:
+                    self._cached_regime_info = cached_regime
+                self.logger.info(
+                    "Loaded %d scan results from local cache (%s).",
+                    len(self.last_results),
+                    CACHE_FILE_PATH,
+                )
+        except Exception as exc:
+            self.logger.warning("Could not read local scan cache from %s: %s", CACHE_FILE_PATH, exc)
+
+    def _save_cached_results(self) -> None:
+        """Atomically persist latest scan results, regime, and timestamp to disk cache."""
+        try:
+            CACHE_FILE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            payload = {
+                "scan_time": self.last_scan_time.isoformat() if self.last_scan_time else None,
+                "market_regime": self.current_regime_info,
+                "results_count": len(self.last_results),
+                "results": self.last_results,
+            }
+            temp_file = CACHE_FILE_PATH.with_suffix(".tmp")
+            with open(temp_file, "w", encoding="utf-8") as f:
+                json.dump(payload, f, indent=2, default=str)
+            temp_file.replace(CACHE_FILE_PATH)
+            self.logger.info(
+                "Persisted %d scan results to cache at %s.",
+                len(self.last_results),
+                CACHE_FILE_PATH,
+            )
+        except Exception as exc:
+            self.logger.warning("Could not write scan cache to %s: %s", CACHE_FILE_PATH, exc)
 
     @property
     def current_regime_info(self) -> Dict[str, Any]:
@@ -108,6 +166,8 @@ class SwingTradingBot:
                 "adx_14": round(self.current_macro_regime.adx_14, 1),
                 "description": self.current_macro_regime.description,
             }
+        if self._cached_regime_info:
+            return self._cached_regime_info
         return {
             "regime": "BULL_TREND",
             "mode_text": "AGRESIVO (1.25%)",
@@ -336,6 +396,9 @@ class SwingTradingBot:
             from datetime import datetime, timezone
             self.last_scan_time = datetime.now(timezone.utc)
             self.last_results = results_summary
+
+            # Persist latest results to disk cache
+            self._save_cached_results()
 
             # 4. Print Summary Report
             self.logger.info("=" * 60)
