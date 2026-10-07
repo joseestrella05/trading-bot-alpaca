@@ -86,7 +86,9 @@ class TestStrategy(unittest.TestCase):
 
         signal = self.strategy.evaluate("DOWNTREND", df)
         self.assertEqual(signal.signal_type, SignalType.HOLD)
-        self.assertIn("Trend filter failed", signal.reason)
+        self.assertTrue(
+            "Trend filter failed" in signal.reason or "Market Regime Defensive" in signal.reason
+        )
 
     def test_trigger_rejection_no_breakout(self):
         # Generate uptrend data where latest close fails to exceed previous high

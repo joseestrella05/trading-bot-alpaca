@@ -1,49 +1,57 @@
-"""Quantitative Swing Trend Following Strategy (1D Timeframe).
+"""Quantitative Swing Trend Following Strategy with Market Regime Integration (1D Timeframe).
 
 Implements:
-1. Macro Trend Filter:
+1. Regime-Gated Analysis:
+   - High Volatility Defensive -> Absolute block of new purchases (HOLD).
+   - Bull Trend / Range Chop -> Evaluates technical setup with adapted position sizing and targets.
+2. Macro Trend Filter:
    - Price > EMA(200)
    - EMA(50) > EMA(200)
-2. Pullback & Trigger Logic:
+3. Pullback & Trigger Logic:
    - Price pulled back towards EMA(20) within recent window
    - Close > previous bar High (breakout above prior day's high)
    - RSI(14) bouncing off the 40 zone (RSI >= 40 and curling upward from support)
-3. Volatility-based Stop Loss:
-   - Stop Loss: 1.5 * ATR(14) below entry price
+4. Predictive ML and News/Earnings Confirmation:
+   - Random Forest probability >= 60%
+   - News/macro safe and no immediate quarterly earnings report.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
 from config import StrategyConfig
-from models import SignalType, TradingSignal
+from models import MarketRegime, SignalType, TradingSignal
+from regime_detector import MarketRegimeDetector, RegimeAnalysis
 
 logger = logging.getLogger(__name__)
 
 
 class SwingTrendFollowingStrategy:
-    """Evaluates swing trend-following pullback setups on daily bars."""
+    """Evaluates swing trend-following pullback setups on daily bars with regime awareness."""
 
     def __init__(
         self,
         config: Optional[StrategyConfig] = None,
         news_filter: Optional[Any] = None,
         ml_predictor: Optional[Any] = None,
+        regime_detector: Optional[MarketRegimeDetector] = None,
     ) -> None:
-        """Initialize strategy with configurable hyper-parameters and filters.
+        """Initialize strategy with configurable hyper-parameters, filters, and regime engine.
 
         Args:
             config: Strategy configuration settings.
             news_filter: Optional NewsFilter instance for macro and earnings checks.
             ml_predictor: Optional StockMLPredictor instance for Random Forest confirmation.
+            regime_detector: Optional MarketRegimeDetector instance for regime analysis.
         """
         self.config = config or StrategyConfig()
         self.news_filter = news_filter
         self.ml_predictor = ml_predictor
+        self.regime_detector = regime_detector or MarketRegimeDetector()
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Compute EMA(20, 50, 200), Wilder's ATR(14), and Wilder's RSI(14).
@@ -93,12 +101,18 @@ class SwingTrendFollowingStrategy:
 
         return out
 
-    def evaluate(self, symbol: str, df: pd.DataFrame) -> TradingSignal:
+    def evaluate(
+        self,
+        symbol: str,
+        df: pd.DataFrame,
+        macro_regime: Optional[RegimeAnalysis] = None,
+    ) -> TradingSignal:
         """Evaluate market data and generate a BUY or HOLD trading signal.
 
         Args:
             symbol: Ticker symbol.
             df: Historical daily OHLCV DataFrame.
+            macro_regime: Optional benchmark market regime analysis (e.g. from SPY).
 
         Returns:
             TradingSignal: Strongly typed signal with quantitative justifications.
@@ -119,11 +133,12 @@ class SwingTrendFollowingStrategy:
                 atr_14=0.0,
                 prev_high=0.0,
                 reason=f"Insufficient history: {len(df) if df is not None else 0} bars available, {min_required_bars} required.",
+                regime=MarketRegime.RANGE_CHOP.value,
+                regime_mode="CONSERVADOR (0.5%)",
             )
 
         indicators_df = self.calculate_indicators(df)
         curr = indicators_df.iloc[-1]
-        prev = indicators_df.iloc[-2]
 
         timestamp = indicators_df.index[-1]
         if hasattr(timestamp, "to_pydatetime"):
@@ -164,6 +179,73 @@ class SwingTrendFollowingStrategy:
                 logger.warning("News evaluation failed for %s: %s", symbol, exc)
 
         # -------------------------------------------------------------
+        # 0. Evaluate Market Regime (Macro & Asset Level)
+        # -------------------------------------------------------------
+        asset_regime: Optional[RegimeAnalysis] = None
+        if self.regime_detector is not None:
+            try:
+                asset_regime = self.regime_detector.analyze(df, symbol=symbol)
+            except Exception as exc:
+                logger.warning("Asset regime detection failed for %s: %s", symbol, exc)
+
+        # A) Check Macro Benchmark Defensive Mode
+        if macro_regime is not None and macro_regime.regime == MarketRegime.HIGH_VOLATILITY_DEFENSIVE:
+            return TradingSignal(
+                symbol=symbol,
+                signal_type=SignalType.HOLD,
+                timestamp=timestamp,
+                close_price=close_price,
+                entry_price=close_price,
+                ema_20=ema_20,
+                ema_50=ema_50,
+                ema_200=ema_200,
+                rsi_14=rsi_14,
+                atr_14=atr_14,
+                prev_high=prev_high,
+                reason=f"HOLD - Market Regime Defensive (Benchmark SPY Macro: {macro_regime.description[:70]})",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
+                regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE.value,
+                regime_mode="DEFENSIVE [OFF]",
+            )
+
+        # B) Check Individual Asset Defensive Mode
+        if asset_regime is not None and asset_regime.regime == MarketRegime.HIGH_VOLATILITY_DEFENSIVE:
+            return TradingSignal(
+                symbol=symbol,
+                signal_type=SignalType.HOLD,
+                timestamp=timestamp,
+                close_price=close_price,
+                entry_price=close_price,
+                ema_20=ema_20,
+                ema_50=ema_50,
+                ema_200=ema_200,
+                rsi_14=rsi_14,
+                atr_14=atr_14,
+                prev_high=prev_high,
+                reason=f"HOLD - Market Regime Defensive ({symbol} Asset: {asset_regime.description[:70]})",
+                ml_probability=ml_prob,
+                news_safe=news_safe,
+                news_reason=news_reason,
+                regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE.value,
+                regime_mode="DEFENSIVE [OFF]",
+            )
+
+        # C) Determine Active Regime (BULL_TREND vs RANGE_CHOP)
+        # If either macro or individual asset is in RANGE_CHOP, use conservative parameters
+        is_range = (
+            (macro_regime is not None and macro_regime.regime == MarketRegime.RANGE_CHOP)
+            or (asset_regime is not None and asset_regime.regime == MarketRegime.RANGE_CHOP)
+        )
+        if is_range:
+            active_regime_str = MarketRegime.RANGE_CHOP.value
+            active_mode_str = "CONSERVADOR (0.5%)"
+        else:
+            active_regime_str = MarketRegime.BULL_TREND.value
+            active_mode_str = "AGRESIVO (1.25%)"
+
+        # -------------------------------------------------------------
         # 1. Filtro de Tendencia (Macro Trend Alignment)
         # Price > EMA(200) AND EMA(50) > EMA(200)
         # -------------------------------------------------------------
@@ -192,6 +274,8 @@ class SwingTrendFollowingStrategy:
                 ml_probability=ml_prob,
                 news_safe=news_safe,
                 news_reason=news_reason,
+                regime=active_regime_str,
+                regime_mode=active_mode_str,
             )
 
         # -------------------------------------------------------------
@@ -200,8 +284,7 @@ class SwingTrendFollowingStrategy:
         # -------------------------------------------------------------
         lookback = min(self.config.pullback_lookback, len(indicators_df))
         recent_window = indicators_df.iloc[-lookback:]
-        
-        # Check if any low tested EMA20 within tolerance
+
         tolerance_factor = 1.0 + self.config.pullback_tolerance_pct
         pullback_tested = False
         for _, row in recent_window.iterrows():
@@ -227,6 +310,8 @@ class SwingTrendFollowingStrategy:
                 ml_probability=ml_prob,
                 news_safe=news_safe,
                 news_reason=news_reason,
+                regime=active_regime_str,
+                regime_mode=active_mode_str,
             )
 
         # -------------------------------------------------------------
@@ -251,13 +336,12 @@ class SwingTrendFollowingStrategy:
                 ml_probability=ml_prob,
                 news_safe=news_safe,
                 news_reason=news_reason,
+                regime=active_regime_str,
+                regime_mode=active_mode_str,
             )
 
         # -------------------------------------------------------------
         # 4. Momentum: RSI(14) rebotando sobre 40
-        # - Current RSI >= 40
-        # - Current RSI > Previous RSI (turning upwards)
-        # - Recent RSI in window tested the pullback support zone (<= rsi_zone_upper)
         # -------------------------------------------------------------
         rsi_window = indicators_df["rsi"].iloc[-self.config.rsi_lookback:]
         min_recent_rsi = float(rsi_window.min())
@@ -290,6 +374,8 @@ class SwingTrendFollowingStrategy:
                 ml_probability=ml_prob,
                 news_safe=news_safe,
                 news_reason=news_reason,
+                regime=active_regime_str,
+                regime_mode=active_mode_str,
             )
 
         # -------------------------------------------------------------
@@ -312,6 +398,8 @@ class SwingTrendFollowingStrategy:
                 ml_probability=ml_prob,
                 news_safe=False,
                 news_reason=news_reason,
+                regime=active_regime_str,
+                regime_mode=active_mode_str,
             )
 
         # -------------------------------------------------------------
@@ -335,6 +423,8 @@ class SwingTrendFollowingStrategy:
                 ml_probability=ml_prob,
                 news_safe=news_safe,
                 news_reason=news_reason,
+                regime=active_regime_str,
+                regime_mode=active_mode_str,
             )
 
         # -------------------------------------------------------------
@@ -360,11 +450,13 @@ class SwingTrendFollowingStrategy:
             atr_14=atr_14,
             prev_high=prev_high,
             reason=(
-                f"BUY setup confirmed: Technical setup valid, News safe, "
-                f"and ML Confirmed ({prob_pct}%)."
+                f"BUY setup confirmed [{active_regime_str}]: Technical valid, "
+                f"News safe, and ML Confirmed ({prob_pct}%)."
             ),
             metrics=metrics,
             ml_probability=ml_prob,
             news_safe=True,
             news_reason=news_reason,
+            regime=active_regime_str,
+            regime_mode=active_mode_str,
         )

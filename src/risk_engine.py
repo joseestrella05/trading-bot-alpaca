@@ -1,12 +1,13 @@
-"""Quantitative Risk Management Engine.
+"""Adaptive Risk Management Engine (Regime-Switching Position Sizing).
 
-Enforces strict portfolio safety controls:
-1. Risk per trade capped at 1.0% of portfolio equity.
-2. Exact position sizing formula:
-   shares = (capital * 0.01) / abs(entry_price - stop_loss_price)
-3. Dynamic Bracket Order levels (Stop Loss = 1.5 * ATR(14), Take Profit = 2:1 ratio).
-4. Intraday Drawdown Kill-Switch (halts execution if drawdown >= 2.5%).
-5. Buying power and concentration limits.
+Dynamically allocates trade risk and profit targets according to active market regime:
+1. BULL_TREND (AGRESIVO): Risk per trade = 1.25%, Risk:Reward Target = 3:1.
+2. RANGE_CHOP (CONSERVADOR): Risk per trade = 0.50%, Risk:Reward Target = 1.5:1.
+3. HIGH_VOLATILITY_DEFENSIVE (PROTECCIÓN): Risk per trade = 0.0%, New entries blocked.
+
+Enforces immutable circuit breakers:
+- Intraday Drawdown maximum capped strictly at 2.5%.
+- Buying power verification and single-stock portfolio concentration limits.
 """
 
 from __future__ import annotations
@@ -16,23 +17,46 @@ import math
 from typing import Optional
 
 from config import RiskConfig
-from models import AccountState, MarketRegime, PositionSize, TradingSignal, SignalType
-from risk_engine import AdaptiveRiskEngine
+from models import AccountState, MarketRegime, PositionSize, SignalType, TradingSignal
 
 logger = logging.getLogger(__name__)
 
 
-class RiskManager:
-    """Calculates risk-adjusted position sizing and monitors drawdown safety thresholds."""
+# Regime parameter dictionary
+REGIME_RISK_SPECS = {
+    MarketRegime.BULL_TREND: {
+        "mode": "AGRESIVO (1.25%)",
+        "risk_per_trade_pct": 0.0125,
+        "risk_reward_ratio": 3.0,
+        "allow_entries": True,
+    },
+    MarketRegime.RANGE_CHOP: {
+        "mode": "CONSERVADOR (0.5%)",
+        "risk_per_trade_pct": 0.0050,
+        "risk_reward_ratio": 1.5,
+        "allow_entries": True,
+    },
+    MarketRegime.HIGH_VOLATILITY_DEFENSIVE: {
+        "mode": "DEFENSIVE [OFF]",
+        "risk_per_trade_pct": 0.0,
+        "risk_reward_ratio": 0.0,
+        "allow_entries": False,
+    },
+}
+
+
+class AdaptiveRiskEngine:
+    """Calculates regime-adaptive position sizes and enforces portfolio risk guardrails."""
 
     def __init__(self, config: Optional[RiskConfig] = None) -> None:
-        """Initialize risk manager.
+        """Initialize risk engine with base configuration.
 
         Args:
-            config: Risk configuration parameters.
+            config: Base risk configuration parameters.
         """
         self.config = config or RiskConfig()
-        self.adaptive_engine = AdaptiveRiskEngine(self.config)
+        # Immutable maximum intraday drawdown threshold: 2.5%
+        self.max_intraday_drawdown_pct = min(self.config.max_intraday_drawdown_pct, 0.025)
 
     def evaluate_account_health(
         self,
@@ -41,31 +65,30 @@ class RiskManager:
         cash: float,
         buying_power: float,
     ) -> AccountState:
-        """Evaluate account state and determine intraday drawdown and kill-switch status.
+        """Evaluate account health and check intraday drawdown circuit breaker.
 
         Args:
             equity: Real-time total portfolio equity.
             last_equity: Previous day closing equity.
             cash: Uninvested cash balance.
-            buying_power: Current buying power.
+            buying_power: Available buying power.
 
         Returns:
             AccountState: Immutable snapshot of portfolio risk status.
         """
         if last_equity > 0:
-            # Drawdown relative to yesterday's closing equity
             intraday_drawdown = max(0.0, (last_equity - equity) / last_equity)
         else:
             intraday_drawdown = 0.0
 
-        kill_switch = intraday_drawdown >= self.config.max_intraday_drawdown_pct
+        kill_switch = intraday_drawdown >= self.max_intraday_drawdown_pct
 
         if kill_switch:
             logger.critical(
-                "KILL-SWITCH ACTIVATED! Intraday drawdown: %.2f%% (threshold: %.2f%%). "
-                "Current equity: $%.2f, Last equity: $%.2f. New orders are blocked.",
+                "CIRCUIT BREAKER TRIGGERED! Intraday drawdown: %.2f%% >= %.2f%% limit. "
+                "Equity: $%.2f, Last Equity: $%.2f. All new executions halted.",
                 intraday_drawdown * 100,
-                self.config.max_intraday_drawdown_pct * 100,
+                self.max_intraday_drawdown_pct * 100,
                 equity,
                 last_equity,
             )
@@ -83,38 +106,32 @@ class RiskManager:
         self,
         signal: TradingSignal,
         account: AccountState,
-        regime: Optional[MarketRegime] = None,
+        regime: MarketRegime = MarketRegime.BULL_TREND,
     ) -> PositionSize:
-        """Compute exact position sizing and bracket order price targets.
+        """Compute regime-adaptive position sizing and bracket order targets.
 
-        If a regime is specified or present on the signal, delegates to the AdaptiveRiskEngine.
-        Otherwise applies standard base configuration parameters.
+        Formula:
+            risk_pct = 1.25% (BULL_TREND) | 0.50% (RANGE_CHOP) | 0.0% (DEFENSIVE)
+            rr_ratio = 3.0:1 (BULL_TREND) | 1.5:1 (RANGE_CHOP)
+            risk_dollars = equity * risk_pct
+            sl_distance = 1.5 * ATR(14)
+            stop_loss_price = entry_price - sl_distance
+            take_profit_price = entry_price + (rr_ratio * sl_distance)
+            shares = risk_dollars / abs(entry_price - stop_loss_price)
 
         Args:
             signal: Trading signal generated by the strategy.
             account: Current account health snapshot.
-            regime: Optional market regime override.
+            regime: Active market regime enum.
 
         Returns:
             PositionSize: Strongly typed sizing specification with validation flags.
         """
-        # Delegate to adaptive regime engine if regime is explicitly specified
-        if regime is not None:
-            return self.adaptive_engine.calculate_position_size(signal, account, regime)
-
-        # Delegate if signal has a recognized regime attached
-        if signal.regime is not None:
-            try:
-                active_regime = MarketRegime(signal.regime)
-                return self.adaptive_engine.calculate_position_size(signal, account, active_regime)
-            except (ValueError, TypeError):
-                pass
-
         symbol = signal.symbol
         entry_price = signal.entry_price
 
-        # Check Kill Switch
-        if account.kill_switch_active:
+        # 1. Circuit Breaker / Kill-Switch check (2.5% max intraday drawdown)
+        if account.kill_switch_active or account.intraday_drawdown_pct >= self.max_intraday_drawdown_pct:
             return PositionSize(
                 symbol=symbol,
                 shares=0.0,
@@ -128,9 +145,36 @@ class RiskManager:
                 risk_reward_ratio=0.0,
                 total_exposure_usd=0.0,
                 is_valid=False,
-                rejection_reason=f"Kill-switch active (Intraday drawdown {account.intraday_drawdown_pct*100:.2f}% >= {self.config.max_intraday_drawdown_pct*100:.2f}%)",
+                rejection_reason=(
+                    f"Circuit breaker active: Intraday drawdown {account.intraday_drawdown_pct*100:.2f}% "
+                    f">= {self.max_intraday_drawdown_pct*100:.2f}% limit."
+                ),
+                regime=regime.value,
+                risk_pct_used=0.0,
             )
 
+        # 2. Defensive Regime Check
+        regime_spec = REGIME_RISK_SPECS.get(regime, REGIME_RISK_SPECS[MarketRegime.RANGE_CHOP])
+        if not regime_spec["allow_entries"] or regime == MarketRegime.HIGH_VOLATILITY_DEFENSIVE:
+            return PositionSize(
+                symbol=symbol,
+                shares=0.0,
+                is_fractional=False,
+                entry_price=entry_price,
+                stop_loss_price=0.0,
+                take_profit_price=0.0,
+                risk_amount_usd=0.0,
+                risk_per_share=0.0,
+                reward_per_share=0.0,
+                risk_reward_ratio=0.0,
+                total_exposure_usd=0.0,
+                is_valid=False,
+                rejection_reason="Market Regime is HIGH_VOLATILITY_DEFENSIVE: Entries halted for capital protection (Risk 0.0%).",
+                regime=regime.value,
+                risk_pct_used=0.0,
+            )
+
+        # 3. Strategy Signal Verification
         if signal.signal_type != SignalType.BUY:
             return PositionSize(
                 symbol=symbol,
@@ -146,6 +190,8 @@ class RiskManager:
                 total_exposure_usd=0.0,
                 is_valid=False,
                 rejection_reason=f"Signal is {signal.signal_type.value}, not BUY.",
+                regime=regime.value,
+                risk_pct_used=0.0,
             )
 
         if entry_price <= 0.0 or signal.atr_14 <= 0.0:
@@ -163,9 +209,15 @@ class RiskManager:
                 total_exposure_usd=0.0,
                 is_valid=False,
                 rejection_reason=f"Invalid pricing data: Entry=${entry_price:.2f}, ATR=${signal.atr_14:.2f}.",
+                regime=regime.value,
+                risk_pct_used=0.0,
             )
 
-        # 1. Calculate Stop Loss distance (1.5 * ATR(14))
+        # 4. Adaptive Parameters
+        risk_pct = regime_spec["risk_per_trade_pct"]
+        rr_target = regime_spec["risk_reward_ratio"]
+
+        # Calculate Stop Loss distance (1.5 * ATR(14))
         sl_distance = self.config.atr_sl_multiplier * signal.atr_14
         stop_loss_price = round(entry_price - sl_distance, 2)
 
@@ -184,9 +236,10 @@ class RiskManager:
                 total_exposure_usd=0.0,
                 is_valid=False,
                 rejection_reason=f"Calculated Stop Loss (${stop_loss_price:.2f}) is below or equal to zero.",
+                regime=regime.value,
+                risk_pct_used=0.0,
             )
 
-        # 2. Risk per share
         risk_per_share = entry_price - stop_loss_price
         if risk_per_share <= 0:
             return PositionSize(
@@ -203,20 +256,20 @@ class RiskManager:
                 total_exposure_usd=0.0,
                 is_valid=False,
                 rejection_reason="Risk per share is non-positive.",
+                regime=regime.value,
+                risk_pct_used=0.0,
             )
 
-        # 3. Take Profit with 2:1 Ratio
-        reward_per_share = self.config.risk_reward_ratio * risk_per_share
+        # Take Profit price based on dynamic R:R target
+        reward_per_share = rr_target * risk_per_share
         take_profit_price = round(entry_price + reward_per_share, 2)
         actual_rr = reward_per_share / risk_per_share
 
-        # 4. Core Position Sizing Formula: shares = (capital * 0.01) / abs(entry_price - stop_loss_price)
-        risk_dollars = account.equity * self.config.max_risk_per_trade_pct
+        # Sizing formula: shares = (equity * risk_pct) / risk_per_share
+        risk_dollars = account.equity * risk_pct
         raw_shares = risk_dollars / risk_per_share
 
-        # 5. Alpaca Bracket Order enforcement:
-        # Note: Alpaca API rejects bracket orders with fractional quantities ("fractional orders must be simple orders").
-        # When allow_fractional is False, we floor to the nearest whole integer.
+        # Enforce whole shares for Alpaca bracket order compliance
         if self.config.allow_fractional:
             shares = round(raw_shares, 4)
             is_fractional = (shares % 1.0) != 0.0
@@ -225,8 +278,6 @@ class RiskManager:
             is_fractional = False
 
         if shares < 1.0:
-            # Cannot take even 1 whole share without exceeding the 1.0% maximum risk constraint
-            one_share_risk = risk_per_share
             return PositionSize(
                 symbol=symbol,
                 shares=0.0,
@@ -241,15 +292,16 @@ class RiskManager:
                 total_exposure_usd=0.0,
                 is_valid=False,
                 rejection_reason=(
-                    f"Position size {raw_shares:.3f} < 1.0 share. Trading 1 share (${one_share_risk:.2f} risk) "
-                    f"would exceed maximum allowed 1.0% capital risk (${risk_dollars:.2f})."
+                    f"Position size {raw_shares:.3f} < 1.0 share. Trading 1 share (${risk_per_share:.2f} risk) "
+                    f"exceeds regime risk allocation of {risk_pct*100:.2f}% (${risk_dollars:.2f})."
                 ),
+                regime=regime.value,
+                risk_pct_used=risk_pct,
             )
 
-        # 6. Buying Power and Concentration Constraints
+        # 5. Buying Power & Exposure Checks
         total_exposure = shares * entry_price
 
-        # Check Buying Power
         if total_exposure > account.buying_power:
             max_shares_bp = math.floor(account.buying_power / entry_price)
             if max_shares_bp < 1.0:
@@ -267,6 +319,8 @@ class RiskManager:
                     total_exposure_usd=total_exposure,
                     is_valid=False,
                     rejection_reason=f"Insufficient buying power (${account.buying_power:.2f} available, ${total_exposure:.2f} required).",
+                    regime=regime.value,
+                    risk_pct_used=risk_pct,
                 )
             logger.warning(
                 "Reducing shares from %d to %d for %s due to available buying power ($%.2f)",
@@ -278,7 +332,7 @@ class RiskManager:
             shares = float(max_shares_bp)
             total_exposure = shares * entry_price
 
-        # Check Maximum Portfolio Concentration per asset
+        # Maximum Single-Asset Portfolio Concentration
         max_allowed_exposure = account.equity * self.config.max_position_equity_pct
         if total_exposure > max_allowed_exposure:
             capped_shares = math.floor(max_allowed_exposure / entry_price)
@@ -309,4 +363,6 @@ class RiskManager:
             total_exposure_usd=total_exposure,
             is_valid=True,
             rejection_reason=None,
+            regime=regime.value,
+            risk_pct_used=risk_pct,
         )

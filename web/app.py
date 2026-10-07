@@ -200,6 +200,7 @@ async def get_status():
             "max_intraday_drawdown_pct": app_config.risk.max_intraday_drawdown_pct * 100,
             "risk_reward_ratio": app_config.risk.risk_reward_ratio,
         },
+        "market_regime": bot_instance.current_regime_info if bot_instance else None,
         "positions": positions,
         "positions_count": len(positions),
     }
@@ -215,6 +216,7 @@ async def get_signals():
         "last_scan_time": bot_instance.last_scan_time.isoformat() if bot_instance.last_scan_time else None,
         "is_scanning": bot_instance.is_scanning,
         "signals_count": len(bot_instance.last_results),
+        "market_regime": bot_instance.current_regime_info if bot_instance else None,
         "results": bot_instance.last_results,
     }
 
@@ -242,6 +244,7 @@ async def trigger_scan_now():
         "aborted": result.get("aborted", False),
         "reason": result.get("reason"),
         "scan_time": bot_instance.last_scan_time.isoformat() if bot_instance.last_scan_time else None,
+        "market_regime": bot_instance.current_regime_info if bot_instance else None,
         "results": bot_instance.last_results,
     }
 

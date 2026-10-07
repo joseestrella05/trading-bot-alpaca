@@ -92,6 +92,19 @@
                 </div>
             </div>
 
+            <!-- ESTADO DE RÉGIMEN ACTUAL -->
+            <div class="hidden md:flex items-center space-x-2.5 bg-gray-900/80 px-3.5 py-1.5 rounded-lg border border-gray-800 text-xs">
+                <span class="text-gray-400 flex items-center space-x-1">
+                    <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
+                    </svg>
+                    <span>RÉGIMEN:</span>
+                </span>
+                <span id="regime-status-badge" class="font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800 shadow-sm">
+                    BULL TREND [AGRESIVO (1.25%)]
+                </span>
+            </div>
+
             <!-- CONTROLS: SCAN NOW & TOGGLE BOT -->
             <div class="flex items-center space-x-3">
                 
@@ -256,6 +269,7 @@
                             <th class="py-3 px-4 font-semibold text-right">ATR(14)</th>
                             <th class="py-3 px-3 font-semibold text-center">ML PROB</th>
                             <th class="py-3 px-3 font-semibold text-center">NEWS / EARNINGS</th>
+                            <th class="py-3 px-3 font-semibold text-center">RÉGIMEN</th>
                             <th class="py-3 px-4 font-semibold text-center">Señal</th>
                             <th class="py-3 px-4 font-semibold">Diagnóstico Cuantitativo</th>
                             <th class="py-3 px-4 font-semibold text-center">Acción / Orden</th>
@@ -263,7 +277,7 @@
                     </thead>
                     <tbody id="radar-table-body" class="divide-y divide-gray-800/60 font-mono">
                         <tr>
-                            <td colspan="12" class="py-8 text-center text-gray-500 font-sans">
+                            <td colspan="13" class="py-8 text-center text-gray-500 font-sans">
                                 Haz clic en <span class="text-blue-400 font-semibold">'Escanear Ahora'</span> para evaluar los tickers en tiempo real.
                             </td>
                         </tr>
@@ -396,6 +410,22 @@
                     document.getElementById('next-scan-display').textContent = nextDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' EST';
                 }
 
+                // Update Market Regime Status Badge
+                if (data.market_regime) {
+                    const reg = data.market_regime;
+                    const rBadge = document.getElementById('regime-status-badge');
+                    if (rBadge) {
+                        rBadge.textContent = reg.display_badge || reg.mode_text || reg.regime;
+                        if (reg.regime === 'BULL_TREND') {
+                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800 shadow-sm';
+                        } else if (reg.regime === 'RANGE_CHOP') {
+                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-amber-950 text-amber-300 border border-amber-800 shadow-sm';
+                        } else {
+                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-rose-950 text-rose-400 border border-rose-800 shadow-sm animate-pulse';
+                        }
+                    }
+                }
+
                 // Render Open Positions
                 renderPositions(data.positions || []);
 
@@ -449,6 +479,21 @@
                 const res = await fetch('/api/signals');
                 if (!res.ok) return;
                 const data = await res.json();
+
+                if (data.market_regime) {
+                    const reg = data.market_regime;
+                    const rBadge = document.getElementById('regime-status-badge');
+                    if (rBadge) {
+                        rBadge.textContent = reg.display_badge || reg.mode_text || reg.regime;
+                        if (reg.regime === 'BULL_TREND') {
+                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800 shadow-sm';
+                        } else if (reg.regime === 'RANGE_CHOP') {
+                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-amber-950 text-amber-300 border border-amber-800 shadow-sm';
+                        } else {
+                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-rose-950 text-rose-400 border border-rose-800 shadow-sm animate-pulse';
+                        }
+                    }
+                }
 
                 if (data.results && data.results.length > 0) {
                     renderRadar(data.results, data.last_scan_time);
@@ -508,6 +553,18 @@
                     newsBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="${item.news_reason || 'Risk'}">${riskLabel}</span>`;
                 }
 
+                // Market Regime badge (BULL_TREND, RANGE_CHOP, DEFENSIVE)
+                let regimeBadge = '<span class="text-gray-500 font-mono text-[10px]">-</span>';
+                if (item.regime) {
+                    if (item.regime === 'BULL_TREND') {
+                        regimeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-950 text-emerald-400 border border-emerald-800" title="BULL TREND: 1.25% Risk | 3:1 RR">BULL TREND</span>';
+                    } else if (item.regime === 'RANGE_CHOP') {
+                        regimeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-amber-950 text-amber-300 border border-amber-800" title="RANGE CHOP: 0.50% Risk | 1.5:1 RR">RANGE CHOP</span>';
+                    } else {
+                        regimeBadge = '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-950 text-rose-400 border border-rose-800" title="DEFENSIVE: Entries Halted">DEFENSIVE</span>';
+                    }
+                }
+
                 let actionBadge = '';
                 if (item.executed) {
                     actionBadge = `<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-900 text-emerald-300 border border-emerald-700">ORDEN ENVIADA (${item.shares} sh)</span>`;
@@ -528,6 +585,7 @@
                         <td class="py-3 px-4 text-right text-gray-400">${item.atr ? fmtUsd(item.atr) : '-'}</td>
                         <td class="py-3 px-3 text-center">${mlBadge}</td>
                         <td class="py-3 px-3 text-center">${newsBadge}</td>
+                        <td class="py-3 px-3 text-center">${regimeBadge}</td>
                         <td class="py-3 px-4 text-center">${signalBadge}</td>
                         <td class="py-3 px-4 font-sans text-xs text-gray-300 max-w-xs truncate" title="${item.reason || ''}">${item.reason || '-'}</td>
                         <td class="py-3 px-4 text-center">${actionBadge}</td>

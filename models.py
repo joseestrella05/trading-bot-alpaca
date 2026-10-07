@@ -19,6 +19,13 @@ class SignalType(str, Enum):
     HOLD = "HOLD"
 
 
+class MarketRegime(str, Enum):
+    """Enumeration of dynamic market structure states."""
+    BULL_TREND = "BULL_TREND"
+    RANGE_CHOP = "RANGE_CHOP"
+    HIGH_VOLATILITY_DEFENSIVE = "HIGH_VOLATILITY_DEFENSIVE"
+
+
 @dataclass(frozen=True)
 class TradingSignal:
     """Represents a trading signal produced by a quantitative strategy.
@@ -37,6 +44,11 @@ class TradingSignal:
         prev_high: High of the previous bar (breakout trigger level).
         reason: Diagnostic explanation of the signal.
         metrics: Dictionary containing additional debug or indicator values.
+        ml_probability: Machine learning random forest bullish probability.
+        news_safe: True if no high impact macro or earnings risk detected.
+        news_reason: Details of news/earnings evaluation.
+        regime: Active market regime string (BULL_TREND, RANGE_CHOP, HIGH_VOLATILITY_DEFENSIVE).
+        regime_mode: Descriptive regime risk mode (e.g., AGRESIVO (1.25%), CONSERVADOR (0.5%)).
     """
     symbol: str
     signal_type: SignalType
@@ -54,6 +66,8 @@ class TradingSignal:
     ml_probability: Optional[float] = None
     news_safe: bool = True
     news_reason: Optional[str] = None
+    regime: Optional[str] = None
+    regime_mode: Optional[str] = None
 
 
 @dataclass(frozen=True)
@@ -67,13 +81,15 @@ class PositionSize:
         entry_price: Desired entry price.
         stop_loss_price: Absolute price for Stop Loss leg.
         take_profit_price: Absolute price for Take Profit leg.
-        risk_amount_usd: Maximum dollar capital placed at risk (1.0% of equity).
+        risk_amount_usd: Maximum dollar capital placed at risk.
         risk_per_share: Absolute risk per share (entry_price - stop_loss_price).
         reward_per_share: Absolute reward per share (take_profit_price - entry_price).
-        risk_reward_ratio: Calculated reward-to-risk ratio (target >= 2.0).
+        risk_reward_ratio: Calculated reward-to-risk ratio.
         total_exposure_usd: Total capital required for entry (shares * entry_price).
         is_valid: True if trade sizing satisfies all risk constraints.
         rejection_reason: Descriptive message if sizing is invalid.
+        regime: Active market regime governing position sizing.
+        risk_pct_used: Actual percentage of portfolio equity allocated to trade risk.
     """
     symbol: str
     shares: float
@@ -88,6 +104,8 @@ class PositionSize:
     total_exposure_usd: float
     is_valid: bool
     rejection_reason: Optional[str] = None
+    regime: Optional[str] = None
+    risk_pct_used: Optional[float] = None
 
 
 @dataclass(frozen=True)
