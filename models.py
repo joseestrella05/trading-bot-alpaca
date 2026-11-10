@@ -48,7 +48,8 @@ class TradingSignal:
         news_safe: True if no high impact macro or earnings risk detected.
         news_reason: Details of news/earnings evaluation.
         regime: Active market regime string (BULL_TREND, RANGE_CHOP, HIGH_VOLATILITY_DEFENSIVE).
-        regime_mode: Descriptive regime risk mode (e.g., AGRESIVO (1.25%), CONSERVADOR (0.5%)).
+        regime_mode: Descriptive regime risk mode (e.g., AGRESIVO (1.25%), DEFENSIVO ACTIVO (0.40%)).
+        risk_multiplier: Continuous regime risk scale (0.0 - 1.25) applied to base risk per trade.
     """
     symbol: str
     signal_type: SignalType
@@ -68,6 +69,7 @@ class TradingSignal:
     news_reason: Optional[str] = None
     regime: Optional[str] = None
     regime_mode: Optional[str] = None
+    risk_multiplier: Optional[float] = None
 
 
 @dataclass(frozen=True)

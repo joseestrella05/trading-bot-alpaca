@@ -8,7 +8,12 @@ Tests:
 """
 
 import unittest
+from datetime import date, timedelta
 from unittest.mock import MagicMock, patch
+
+import numpy as np
+import pandas as pd
+from alpaca.common.exceptions import APIError
 
 from config import AlpacaConfig, ExecutionConfig, RiskConfig
 from execution import AlpacaExecutionHandler
@@ -88,6 +93,71 @@ class TestExecutionHandler(unittest.TestCase):
         self.assertFalse(result.success)
         self.assertEqual(result.status, "VALIDATION_FAILED")
         self.assertEqual(result.error_message, "Drawdown Kill-Switch Active")
+
+
+def _bars(closes):
+    """Daily bars ending yesterday with a fixed +/-1 range (ATR converges to ~2)."""
+    closes = np.asarray(closes, dtype=float)
+    end = pd.Timestamp(date.today() - timedelta(days=1), tz="UTC")
+    idx = pd.date_range(end=end, periods=len(closes), freq="D")
+    return pd.DataFrame(
+        {"open": closes, "high": closes + 1, "low": closes - 1, "close": closes, "volume": 1e6}, index=idx
+    )
+
+
+class TestTrailingStops(unittest.TestCase):
+    @patch("execution.TradingClient")
+    def setUp(self, _mock_client_cls):
+        self.handler = AlpacaExecutionHandler(
+            alpaca_config=AlpacaConfig(api_key="K", secret_key="S", paper=True),
+            execution_config=ExecutionConfig(dry_run=False),
+            risk_manager=RiskManager(RiskConfig()),  # atr_sl_multiplier=1.5 -> 1.5R = 2.25 ATR
+        )
+        self.client = self.handler._client
+        self.data_provider = MagicMock()
+
+    def _pos(self, price, stop, entry=100.0):
+        return {"symbol": "AAPL", "qty": 10.0, "avg_entry_price": entry, "current_price": price,
+                "stop_loss": stop, "stop_order_id": "sl-1"}
+
+    def _run(self, pos, bars):
+        return self.handler.update_open_positions_trailing_stops(
+            [pos], self.data_provider, bars_by_symbol={"AAPL": bars}
+        )
+
+    def test_breakeven_after_one_atr(self):
+        # Flat 100 -> ATR=2, EMA=100. Price 102.5 >= 100 + 1*ATR but < 1.5R trail level (104.5).
+        updated = self._run(self._pos(price=102.5, stop=97.0), _bars([100.0] * 60))
+        self.assertEqual(updated, {"AAPL": 100.0})
+        order_id, req = self.client.replace_order_by_id.call_args.args
+        self.assertEqual((order_id, req.stop_price), ("sl-1", 100.0))
+
+    def test_trail_to_ema_and_last_low(self):
+        # Rising ramp 90->110: EMA20 ~106.8, last closed low = 109 -> stop goes to the higher (109).
+        bars = _bars(np.linspace(90, 110, 60))
+        updated = self._run(self._pos(price=111.0, stop=100.0), bars)
+        self.assertEqual(updated, {"AAPL": 109.0})
+        self.assertEqual(self.client.replace_order_by_id.call_args.args[1].stop_price, 109.0)
+
+    def test_stop_never_lowered(self):
+        bars = _bars(np.linspace(90, 110, 60))
+        # Losing position: untouched.
+        self.assertEqual(self._run(self._pos(price=95.0, stop=97.0), bars), {})
+        # Winning, but current stop (110) already above EMA/low/entry: not lowered.
+        self.assertEqual(self._run(self._pos(price=111.0, stop=110.0), bars), {})
+        # In profit but below the breakeven trigger: untouched.
+        self.assertEqual(self._run(self._pos(price=101.0, stop=97.0), _bars([100.0] * 60)), {})
+        self.client.replace_order_by_id.assert_not_called()
+
+    def test_api_error_is_handled(self):
+        self.client.replace_order_by_id.side_effect = APIError('{"code":42210000,"message":"order is pending"}')
+        self.assertEqual(self._run(self._pos(price=102.5, stop=97.0), _bars([100.0] * 60)), {})
+
+    def test_missing_bars_downloaded_from_provider(self):
+        self.data_provider.get_daily_bars.return_value = _bars([100.0] * 60)
+        updated = self.handler.update_open_positions_trailing_stops([self._pos(102.5, 97.0)], self.data_provider)
+        self.assertEqual(updated, {"AAPL": 100.0})
+        self.data_provider.get_daily_bars.assert_called_once()
 
 
 if __name__ == "__main__":

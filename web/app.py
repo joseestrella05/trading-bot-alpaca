@@ -16,7 +16,7 @@ from typing import Any, Deque, Dict, List, Optional
 
 from fastapi import BackgroundTasks, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, Response
 from fastapi.templating import Jinja2Templates
 
 from config import AppConfig, load_config
@@ -102,6 +102,7 @@ async def lifespan(app: FastAPI):
 
     # Trigger initial scan in background thread immediately on startup without blocking server launch
     async def _initial_background_scan():
+        await asyncio.to_thread(bot_instance.sync_trade_history)  # audit history even if the bot starts paused
         logger.info("Triggering initial background scan on startup...")
         try:
             await asyncio.to_thread(bot_instance.run_scan)
@@ -181,6 +182,15 @@ async def get_status():
     except Exception as exc:
         logging.getLogger("API").error("Failed to query positions: %s", exc)
         positions = []
+
+    # Persist today's equity snapshot (upsert by date) for the audited equity curve
+    try:
+        await asyncio.to_thread(
+            bot_instance.auditor.record_daily_equity,
+            account_state.equity, account_state.cash, account_state.buying_power,
+        )
+    except Exception as exc:
+        logging.getLogger("API").error("Failed to record equity snapshot: %s", exc)
 
     # Calculate intraday PnL
     intraday_pnl = account_state.equity - account_state.last_equity
@@ -277,6 +287,29 @@ async def toggle_bot_state():
         "status_text": state_str,
         "message": f"Bot is now {state_str}.",
     }
+
+
+@app.get("/api/performance")
+async def get_performance():
+    """Audited performance statistics and 90-day equity curve from SQLite."""
+    if not bot_instance:
+        return JSONResponse(status_code=503, content={"error": "Bot subsystem not initialized"})
+    await asyncio.to_thread(bot_instance.sync_trade_history, 3600)  # re-sync if last one > 1h old
+    return await asyncio.to_thread(bot_instance.auditor.get_performance_summary)
+
+
+@app.get("/api/export/trades.csv")
+async def export_trades_csv():
+    """Download the audited closed-trade history as CSV."""
+    if not bot_instance:
+        return JSONResponse(status_code=503, content={"error": "Bot subsystem not initialized"})
+    content = await asyncio.to_thread(bot_instance.auditor.export_trades_csv)
+    filename = f"trades_audit_{datetime.now(timezone.utc):%Y%m%d}.csv"
+    return Response(
+        content=content,
+        media_type="text/csv",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @app.get("/api/logs")

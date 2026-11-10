@@ -71,4 +71,9 @@ htmlcov/
 # ==============================================================================
 data/*.json
 data/*.tmp
+data/*.db-wal
+data/*.db-shm
 
+
+# Trained ML model (regenerated automatically on startup)
+models/stock_lgbm_model.joblib

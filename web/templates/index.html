@@ -4,697 +4,624 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ title }}</title>
-    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
             theme: {
                 extend: {
-                    colors: {
-                        brand: {
-                            darker: '#090d16',
-                            card: '#111827',
-                            cardBorder: '#1f2937',
-                            accent: '#3b82f6',
-                            emerald: '#10b981',
-                            rose: '#f43f5e',
-                            amber: '#f59e0b',
-                        }
-                    },
+                    colors: { neon: { green: '#10B981', red: '#EF4444', cyan: '#06B6D4' } },
                     fontFamily: {
                         mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
                         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
-                    }
-                }
-            }
-        }
+                    },
+                },
+            },
+        };
     </script>
     <style>
-        /* Custom scrollbar for terminal */
-        ::-webkit-scrollbar {
-            width: 6px;
-            height: 6px;
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.22); }
+        .scroll-smooth-x { scroll-behavior: smooth; -webkit-overflow-scrolling: touch; }
+        .glass {
+            background: rgba(15, 23, 42, 0.40);
+            -webkit-backdrop-filter: blur(24px);
+            backdrop-filter: blur(24px);
+            border: 1px solid rgba(255, 255, 255, 0.10);
+            border-radius: 1rem;
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
         }
-        ::-webkit-scrollbar-track {
-            background: #0b0f19;
+        .glass-btn {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            -webkit-backdrop-filter: blur(12px);
+            backdrop-filter: blur(12px);
+            transition: background .2s, border-color .2s, transform .1s;
         }
-        ::-webkit-scrollbar-thumb {
-            background: #2d3748;
-            border-radius: 3px;
-        }
-        ::-webkit-scrollbar-thumb:hover {
-            background: #4a5568;
-        }
-        @keyframes pulse-dot {
-            0%, 100% { opacity: 1; transform: scale(1); }
-            50% { opacity: 0.4; transform: scale(0.85); }
-        }
-        .animate-pulse-dot {
-            animation: pulse-dot 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
-        }
+        .glass-btn:hover:not(:disabled) { background: rgba(255, 255, 255, 0.10); border-color: rgba(255, 255, 255, 0.22); }
+        .glass-btn:active:not(:disabled) { transform: scale(0.98); }
+        .glass-btn:disabled { opacity: .55; cursor: not-allowed; }
+        .glass-btn:focus-visible { outline: 2px solid #06B6D4; outline-offset: 2px; }
+        .kpi-label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: rgb(148 163 184); font-weight: 600; }
+        .fade-update { transition: color .4s ease; }
+        @keyframes ping-soft { 75%, 100% { transform: scale(2.2); opacity: 0; } }
+        .ping-soft { animation: ping-soft 1.6s cubic-bezier(0, 0, 0.2, 1) infinite; }
+        @media (prefers-reduced-motion: reduce) { .ping-soft, .animate-pulse { animation: none; } }
     </style>
 </head>
-<body class="bg-[#090d16] text-gray-200 font-sans min-h-screen flex flex-col antialiased selection:bg-blue-600 selection:text-white">
+<body class="bg-gradient-to-br from-[#0B0F19] via-[#0D1527] to-[#05070D] bg-fixed min-h-screen text-slate-100 font-sans antialiased selection:bg-cyan-500/40">
 
-    <!-- TOP NAVIGATION / HEADER -->
-    <header class="border-b border-gray-800/90 bg-[#0c111e]/95 backdrop-blur sticky top-0 z-50 px-4 lg:px-8 py-3">
-        <div class="max-w-7xl mx-auto flex flex-wrap items-center justify-between gap-3">
-            
-            <!-- LOGO & BRAND -->
-            <div class="flex items-center space-x-3 min-w-[240px]">
-                <div class="w-9 h-9 rounded-lg bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center shadow-lg shadow-blue-500/20 flex-shrink-0">
-                    <svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-                    </svg>
+    <!-- ambient glows behind the glass -->
+    <div aria-hidden="true" class="pointer-events-none fixed inset-0 overflow-hidden -z-10">
+        <div class="absolute -top-40 -left-32 w-[480px] h-[480px] rounded-full bg-emerald-500/10 blur-3xl"></div>
+        <div class="absolute top-1/3 -right-40 w-[520px] h-[520px] rounded-full bg-cyan-500/10 blur-3xl"></div>
+    </div>
+
+    <!-- HEADER -->
+    <header class="lg:sticky top-0 z-30 px-4 sm:px-6 pt-4">
+        <div class="glass max-w-[1600px] mx-auto px-4 sm:px-6 py-4 flex flex-wrap items-center justify-between gap-4">
+            <div class="flex items-center gap-3 min-w-0">
+                <div class="w-10 h-10 shrink-0 rounded-xl bg-gradient-to-br from-emerald-500/30 to-cyan-500/30 border border-white/10 flex items-center justify-center">
+                    <svg class="w-5 h-5 text-cyan-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M3 17l6-6 4 4 8-8M14 7h7v7"/></svg>
                 </div>
-                <div>
-                    <div class="flex items-center space-x-2">
-                        <h1 class="text-sm sm:text-base font-bold tracking-tight text-white uppercase font-mono">QuantBot Alpaca</h1>
-                        <span id="env-badge" class="text-[10px] uppercase font-mono font-bold tracking-wider px-2 py-0.5 rounded bg-blue-950/90 text-blue-300 border border-blue-700/60">
-                            {{ "PAPER TRADING" if paper_mode else "LIVE REAL MONEY" }}
-                        </span>
-                    </div>
-                    <p class="text-[11px] text-gray-400">Swing Trend Following (1D Pullback + Bracket Orders)</p>
+                <div class="min-w-0">
+                    <h1 class="text-sm sm:text-base font-bold tracking-[0.08em] sm:tracking-[0.18em] text-white font-mono truncate">QUANTBOT SYSTEMATIC ENGINE</h1>
+                    <p class="text-[11px] text-slate-400 font-mono truncate">QuantBot Alpaca · Swing 1D · <span id="next-scan-display">--</span></p>
                 </div>
             </div>
 
-            <!-- STATUS CLUSTER: ONLINE BADGE + NEXT SCAN + REGIME PILL -->
-            <div class="flex items-center flex-wrap gap-2.5">
-                <!-- BOT STATUS & NEXT SCAN -->
-                <div class="flex items-center space-x-3 bg-gray-900/90 px-3 py-1.5 rounded-lg border border-gray-800 text-xs">
-                    <div class="flex items-center space-x-1.5">
-                        <span id="bot-status-indicator" class="w-2 h-2 rounded-full bg-emerald-500 animate-pulse-dot"></span>
-                        <span id="bot-status-text" class="font-mono font-bold text-emerald-400 text-xs">ONLINE</span>
-                    </div>
-                    <div class="h-3.5 w-px bg-gray-800"></div>
-                    <div class="text-gray-400 flex items-center space-x-1 text-[11px]">
-                        <span>Próximo Escaneo:</span>
-                        <span id="next-scan-display" class="font-mono text-gray-200 font-medium">3:50 PM EST (L-V)</span>
-                    </div>
+            <div class="flex flex-wrap items-center gap-2 sm:gap-3">
+                <!-- Mode indicator (read-only: set by ALPACA_PAPER, switching to live requires restart) -->
+                <div class="flex rounded-lg overflow-hidden border border-white/10 text-[11px] font-mono font-bold" title="Modo definido por ALPACA_PAPER en .env (requiere reinicio)">
+                    <span id="mode-paper" class="px-2.5 py-1 {{ 'bg-cyan-500/20 text-cyan-300' if paper_mode else 'text-slate-500' }}">PAPER</span>
+                    <span id="mode-live" class="px-2.5 py-1 {{ 'text-slate-500' if paper_mode else 'bg-red-500/25 text-red-300' }}">LIVE</span>
                 </div>
 
-                <!-- ESTADO DE RÉGIMEN ACTUAL -->
-                <div class="flex items-center space-x-2 bg-gray-900/90 px-3 py-1.5 rounded-lg border border-gray-800 text-xs shadow-sm">
-                    <span class="text-gray-400 font-medium text-[11px] flex items-center space-x-1">
-                        <svg class="w-3.5 h-3.5 text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7h8m0 0v8m0-8l-8 8-4-4-6 6"></path>
-                        </svg>
-                        <span class="uppercase tracking-wider font-semibold text-gray-400">RÉGIMEN:</span>
+                <!-- Connection status with dynamic ping -->
+                <div class="flex items-center gap-2 px-2.5 py-1 rounded-lg bg-white/5 border border-white/10 text-[11px] font-mono">
+                    <span class="relative flex w-2.5 h-2.5">
+                        <span id="conn-ping" class="absolute inline-flex w-full h-full rounded-full bg-emerald-400 ping-soft"></span>
+                        <span id="conn-dot" class="relative inline-flex w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                     </span>
-                    <span id="regime-status-badge" class="font-mono font-bold px-2 py-0.5 rounded-md text-xs whitespace-nowrap bg-emerald-950/60 text-emerald-300 border border-emerald-700/60 shadow-sm">
-                        BULL TREND [AGRESIVO (1.25%)]
-                    </span>
+                    <span id="bot-status-text" class="font-semibold text-emerald-300">CONECTANDO</span>
+                    <span id="conn-latency" class="text-slate-400">-- ms</span>
                 </div>
+
+                <!-- Adaptive regime badge -->
+                <span id="regime-status-badge" class="px-2.5 py-1 rounded-full text-[11px] font-mono font-bold whitespace-nowrap bg-white/5 text-slate-300 border border-white/10" title="">RÉGIMEN --</span>
             </div>
 
-            <!-- CONTROLS: SCAN NOW & TOGGLE BOT -->
-            <div class="flex items-center space-x-2.5">
-                <!-- SCAN NOW BUTTON -->
-                <button id="btn-scan-now" onclick="triggerManualScan()" class="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 text-white text-xs font-semibold shadow-md shadow-blue-600/20 transition disabled:opacity-50 disabled:cursor-not-allowed">
-                    <svg id="scan-spinner" class="hidden w-3.5 h-3.5 animate-spin text-white" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                    </svg>
-                    <svg id="scan-icon" class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                    </svg>
-                    <span id="scan-btn-label">Escanear Ahora</span>
+            <div class="flex flex-wrap items-center gap-2 w-full lg:w-auto">
+                <button id="btn-scan-now" onclick="triggerManualScan()" class="glass-btn rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center gap-2">
+                    <svg id="scan-spinner" class="hidden w-4 h-4 animate-spin text-cyan-300" fill="none" viewBox="0 0 24 24" aria-hidden="true"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z"></path></svg>
+                    <svg id="scan-icon" class="w-4 h-4 text-cyan-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="M21 21l-4.3-4.3"/></svg>
+                    <span id="scan-btn-label">Escaneo Manual</span>
                 </button>
-
-                <!-- TOGGLE BOT SWITCH -->
-                <button id="btn-toggle-bot" onclick="toggleBotState()" class="inline-flex items-center space-x-2 px-3.5 py-2 rounded-lg bg-gray-800/90 hover:bg-gray-700 active:bg-gray-900 border border-gray-700 text-xs font-medium text-gray-200 transition">
+                <button id="btn-toggle-bot" onclick="toggleBotState()" class="glass-btn rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center gap-2">
                     <span id="toggle-circle" class="w-2 h-2 rounded-full bg-emerald-400"></span>
-                    <span id="toggle-label">Pausar Bot</span>
+                    <span id="toggle-label">Pausar</span>
                 </button>
+                <a href="/api/export/trades.csv" download class="glass-btn rounded-xl px-3.5 py-2 text-xs font-semibold flex items-center gap-2">
+                    <svg class="w-4 h-4 text-emerald-300" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v12m0 0l-4-4m4 4l4-4M4 20h16"/></svg>
+                    Exportar CSV Auditado
+                </a>
+                <span id="action-feedback" role="status" aria-live="polite" class="text-[11px] font-mono text-amber-300"></span>
             </div>
         </div>
     </header>
 
-    <!-- MAIN DASHBOARD CONTENT -->
-    <main class="flex-1 max-w-7xl w-full mx-auto px-4 lg:px-8 py-6 space-y-6">
+    <main class="px-4 sm:px-6 py-5 space-y-5 max-w-[1600px] mx-auto">
 
-        <!-- 1. METRIC SUMMARY CARDS -->
-        <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-            
-            <!-- TOTAL EQUITY -->
-            <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-4 shadow-sm hover:border-gray-700 transition">
-                <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
-                    <span>Portfolio Equity</span>
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                    </svg>
+        <!-- KPI ROW -->
+        <section class="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4" aria-label="KPIs">
+            <div class="glass p-5">
+                <div class="kpi-label">Portfolio Equity</div>
+                <div id="metric-equity" class="mt-2 text-2xl sm:text-3xl font-bold font-mono text-white fade-update">--</div>
+                <div class="mt-3 flex flex-wrap items-center gap-2 text-xs font-mono">
+                    <span class="text-slate-400">P&amp;L acumulado</span>
+                    <span id="metric-total-pnl" class="px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 text-slate-200">--</span>
                 </div>
-                <div class="mt-2 flex items-baseline justify-between">
-                    <span id="metric-equity" class="text-2xl font-bold font-mono text-white">$---,---.--</span>
-                </div>
-                <div class="mt-2 text-xs flex items-center space-x-1.5 text-gray-400">
-                    <span>Efectivo disponible:</span>
-                    <span id="metric-cash" class="font-mono text-gray-300 font-medium">$---,---.--</span>
+                <div class="mt-1.5 flex flex-wrap items-center gap-2 text-xs font-mono">
+                    <span class="text-slate-400">Hoy</span>
+                    <span id="metric-intraday-pnl" class="text-slate-200">--</span>
+                    <span id="metric-intraday-pnl-pct" class="text-slate-400"></span>
                 </div>
             </div>
 
-            <!-- BUYING POWER -->
-            <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-4 shadow-sm hover:border-gray-700 transition">
-                <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
-                    <span>Poder de Compra</span>
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path>
-                    </svg>
+            <div class="glass p-5">
+                <div class="kpi-label">Sharpe &amp; Sortino <span class="normal-case tracking-normal text-slate-500">(anualizado)</span></div>
+                <div class="mt-2 grid grid-cols-2 gap-3">
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-mono">Sharpe</div>
+                        <div id="metric-sharpe" class="text-2xl font-bold font-mono text-cyan-300">--</div>
+                    </div>
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-mono">Sortino</div>
+                        <div id="metric-sortino" class="text-2xl font-bold font-mono text-cyan-300">--</div>
+                    </div>
                 </div>
-                <div class="mt-2 flex items-baseline justify-between">
-                    <span id="metric-buying-power" class="text-2xl font-bold font-mono text-blue-400">$---,---.--</span>
-                </div>
-                <div class="mt-2 text-xs flex items-center space-x-1.5 text-gray-400">
-                    <span>Apalancamiento:</span>
-                    <span class="font-mono text-gray-300">Reg-T (4x Intradía / 2x O/N)</span>
-                </div>
+                <div class="mt-3 text-[11px] text-slate-400 font-mono">Retornos diarios auditados (SQLite)</div>
             </div>
 
-            <!-- INTRADAY P&L -->
-            <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-4 shadow-sm hover:border-gray-700 transition">
-                <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
-                    <span>P&L Intradía</span>
-                    <svg class="w-4 h-4 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"></path>
-                    </svg>
+            <div class="glass p-5">
+                <div class="kpi-label">Win Rate &amp; Profit Factor</div>
+                <div class="mt-2 grid grid-cols-2 gap-3">
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-mono">Win Rate</div>
+                        <div id="metric-winrate" class="text-2xl font-bold font-mono text-white">--</div>
+                    </div>
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-mono">Profit Factor</div>
+                        <div id="metric-pf" class="text-2xl font-bold font-mono text-white">--</div>
+                    </div>
                 </div>
-                <div class="mt-2 flex items-baseline space-x-2">
-                    <span id="metric-intraday-pnl" class="text-2xl font-bold font-mono text-gray-200">$0.00</span>
-                    <span id="metric-intraday-pnl-pct" class="text-xs font-mono font-semibold px-1.5 py-0.5 rounded bg-gray-800 text-gray-400">+0.00%</span>
-                </div>
-                <div class="mt-2 text-xs flex items-center space-x-1.5 text-gray-400">
-                    <span>Cierre Previo:</span>
-                    <span id="metric-last-equity" class="font-mono text-gray-300">$---,---.--</span>
-                </div>
+                <div class="mt-3 text-[11px] text-slate-400 font-mono"><span id="metric-trades">0</span> trades cerrados</div>
             </div>
 
-            <!-- KILL SWITCH & DRAWDOWN -->
-            <div class="bg-gray-900/90 border border-gray-800 rounded-xl p-4 shadow-sm hover:border-gray-700 transition">
-                <div class="flex items-center justify-between text-xs text-gray-400 font-medium">
-                    <span>Intraday Drawdown</span>
-                    <span id="kill-switch-badge" class="px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-emerald-950 text-emerald-400 border border-emerald-800">
-                        NORMAL
-                    </span>
+            <div class="glass p-5">
+                <div class="flex items-center justify-between gap-2">
+                    <div class="kpi-label">Drawdown &amp; Kill-Switch</div>
+                    <span id="kill-switch-badge" class="px-2 py-0.5 text-[10px] font-mono font-bold rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">NORMAL</span>
                 </div>
-                <div class="mt-2 flex items-baseline space-x-2">
-                    <span id="metric-drawdown" class="text-2xl font-bold font-mono text-gray-200">0.00%</span>
-                    <span class="text-xs text-gray-400 font-mono">/ máx 2.50%</span>
+                <div class="mt-2 grid grid-cols-2 gap-3">
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-mono">Max DD histórico</div>
+                        <div id="metric-maxdd" class="text-2xl font-bold font-mono text-white">--</div>
+                    </div>
+                    <div>
+                        <div class="text-[11px] text-slate-400 font-mono">DD intradía</div>
+                        <div id="metric-drawdown" class="text-2xl font-bold font-mono text-white">--</div>
+                    </div>
                 </div>
-                <div class="mt-2 text-xs flex items-center justify-between text-gray-400">
-                    <span>Riesgo / trade: <span class="font-mono text-gray-300 font-medium">1.0%</span></span>
-                    <span>R:R: <span class="font-mono text-gray-300 font-medium">2:1</span></span>
-                </div>
+                <div class="mt-3 text-[11px] text-slate-400 font-mono">Límite kill-switch: <span id="metric-ks-limit">--</span></div>
             </div>
-
         </section>
 
-        <!-- 2. POSICIONES ABIERTAS (OPEN POSITIONS WITH BRACKET LEGS) -->
-        <section class="bg-gray-900/90 border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-            <div class="px-5 py-4 border-b border-gray-800 flex items-center justify-between">
-                <div class="flex items-center space-x-2">
-                    <h2 class="text-sm font-bold tracking-tight text-white uppercase font-mono">Posiciones Abiertas en Cartera</h2>
-                    <span id="positions-badge-count" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-gray-800 text-gray-300">0</span>
-                </div>
-                <span class="text-xs text-gray-400">Bracket Orders activas con Take Profit y Stop Loss</span>
+        <!-- EQUITY CHART -->
+        <section class="glass p-5">
+            <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+                <h2 class="text-sm font-semibold tracking-wide text-slate-200">Curva de Equidad Auditada <span class="text-slate-500 font-normal">· 90 días</span></h2>
+                <span id="equity-chart-note" class="text-[11px] font-mono text-slate-400"></span>
             </div>
-            
-            <div class="overflow-x-auto">
-                <table class="w-full text-left text-xs text-gray-300">
-                    <thead class="bg-[#0c121e] text-[11px] uppercase font-mono tracking-wider text-gray-400 border-b border-gray-800">
-                        <tr>
-                            <th class="py-3 px-4 font-semibold">Ticker</th>
-                            <th class="py-3 px-4 font-semibold">Lado</th>
-                            <th class="py-3 px-4 font-semibold text-right">Shares</th>
-                            <th class="py-3 px-4 font-semibold text-right">Precio Entrada</th>
-                            <th class="py-3 px-4 font-semibold text-right">Precio Actual</th>
-                            <th class="py-3 px-4 font-semibold text-right">Valor Mercado</th>
-                            <th class="py-3 px-4 font-semibold text-right">P&L No Realizado</th>
-                            <th class="py-3 px-4 font-semibold text-right">Stop Loss (SL)</th>
-                            <th class="py-3 px-4 font-semibold text-right">Take Profit (TP)</th>
+            <div class="relative h-64 sm:h-72">
+                <canvas id="equity-chart" aria-label="Curva de equidad de la cuenta" role="img"></canvas>
+                <div id="equity-chart-empty" class="hidden absolute inset-0 flex items-center justify-center text-xs font-mono text-slate-400">
+                    Sin snapshots de equidad todavía. Se registran automáticamente cada día.
+                </div>
+            </div>
+        </section>
+
+        <!-- OPEN POSITIONS -->
+        <section class="glass overflow-hidden">
+            <div class="px-5 py-4 border-b border-white/10 flex items-center justify-between">
+                <h2 class="text-sm font-semibold tracking-wide text-slate-200">Posiciones Abiertas</h2>
+                <span id="positions-badge-count" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-white/5 border border-white/10 text-slate-300">0</span>
+            </div>
+            <div class="overflow-x-auto scroll-smooth-x">
+                <table class="w-full text-sm">
+                    <thead>
+                        <tr class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-white/5">
+                            <th scope="col" class="py-2.5 px-4 text-left font-semibold">Ticker</th>
+                            <th scope="col" class="py-2.5 px-3 text-left font-semibold">Lado</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Acciones</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Entrada</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Actual</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Stop Loss</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Take Profit</th>
+                            <th scope="col" class="py-2.5 px-4 text-right font-semibold">P&amp;L No Realizado</th>
                         </tr>
                     </thead>
-                    <tbody id="positions-table-body" class="divide-y divide-gray-800/60 font-mono">
-                        <tr>
-                            <td colspan="9" class="py-8 text-center text-gray-500 font-sans">
-                                No hay posiciones abiertas en Alpaca en este momento.
-                            </td>
-                        </tr>
+                    <tbody id="positions-table-body" class="divide-y divide-white/5">
+                        <tr><td colspan="8" class="py-8 text-center text-slate-400 text-xs font-mono">Cargando posiciones...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
-        <!-- 3. RADAR DE MERCADO (SCANNER RESULTS & TECHNICAL INDICATORS) -->
-        <section class="bg-gray-900/90 border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-            <div class="px-5 py-4 border-b border-gray-800 flex flex-wrap items-center justify-between gap-2">
-                <div class="flex items-center space-x-2">
-                    <h2 class="text-sm font-bold tracking-tight text-white uppercase font-mono">Radar Cuantitativo de Mercado</h2>
-                    <span id="radar-count-badge" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-blue-950 text-blue-400 border border-blue-900">7 Tickers</span>
-                </div>
-                <div class="text-xs text-gray-400 flex items-center space-x-2">
-                    <span>Último análisis:</span>
-                    <span id="radar-last-scan" class="font-mono text-gray-300">Pendiente de escaneo</span>
+        <!-- QUANT RADAR -->
+        <section class="glass overflow-hidden">
+            <div class="px-5 py-4 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
+                <h2 class="text-sm font-semibold tracking-wide text-slate-200">Radar Cuantitativo de Mercado</h2>
+                <div class="flex items-center gap-2 text-[11px] font-mono text-slate-400">
+                    <span>Último escaneo: <span id="radar-last-scan" class="text-slate-200">--</span></span>
+                    <span id="radar-count-badge" class="px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-300 border border-cyan-500/30">0 Tickers</span>
                 </div>
             </div>
-
-            <div class="overflow-x-auto rounded-b-xl border-t border-gray-800/80">
-                <table class="w-full text-left text-xs text-gray-300 whitespace-nowrap">
-                    <thead class="bg-[#0b101c] text-[11px] uppercase font-mono tracking-wider text-gray-400 border-b border-gray-800">
-                        <tr>
-                            <th class="py-3 px-3.5 font-semibold text-left">Ticker</th>
-                            <th class="py-3 px-3 font-semibold text-right">Precio 1D</th>
-                            <th class="py-3 px-2.5 font-semibold text-center">RSI(14)</th>
-                            <th class="py-3 px-3 font-semibold text-right">EMA(20)</th>
-                            <th class="py-3 px-3 font-semibold text-right">EMA(50)</th>
-                            <th class="py-3 px-3 font-semibold text-right">EMA(200)</th>
-                            <th class="py-3 px-3 font-semibold text-right">ATR(14)</th>
-                            <th class="py-3 px-3 font-semibold text-center min-w-[85px]">ML PROB</th>
-                            <th class="py-3 px-3 font-semibold text-center min-w-[125px]">NEWS / EARNINGS</th>
-                            <th class="py-3 px-3 font-semibold text-center min-w-[110px]">RÉGIMEN</th>
-                            <th class="py-3 px-3 font-semibold text-center min-w-[70px]">Señal</th>
-                            <th class="py-3 px-3.5 font-semibold text-left min-w-[200px]">Diagnóstico Cuantitativo</th>
-                            <th class="py-3 px-3 font-semibold text-center min-w-[110px]">Acción / Orden</th>
+            <div class="overflow-x-auto scroll-smooth-x">
+                <table class="w-full text-[13px] min-w-[1100px]">
+                    <thead>
+                        <tr class="text-[11px] uppercase tracking-wider text-slate-400 border-b border-white/5">
+                            <th scope="col" class="py-2.5 px-4 text-left font-semibold">Ticker</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Precio</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold">RSI</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">EMA20</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">EMA50</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">EMA200</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">ATR</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold text-cyan-300 bg-cyan-500/5">Prob. ML</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold">Noticias</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold">Régimen</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold">Señal</th>
+                            <th scope="col" class="py-2.5 px-3 text-left font-semibold">Motivo</th>
+                            <th scope="col" class="py-2.5 px-4 text-center font-semibold">Acción</th>
                         </tr>
                     </thead>
-                    <tbody id="radar-table-body" class="divide-y divide-gray-800/60 font-mono text-xs">
-                        <tr>
-                            <td colspan="13" class="py-8 text-center text-gray-500 font-sans">
-                                Haz clic en <span class="text-blue-400 font-semibold">'Escanear Ahora'</span> para evaluar los tickers en tiempo real.
-                            </td>
-                        </tr>
+                    <tbody id="radar-table-body" class="divide-y divide-white/5">
+                        <tr><td colspan="13" class="py-8 text-center text-slate-400 text-xs font-mono">Esperando el primer escaneo...</td></tr>
                     </tbody>
                 </table>
             </div>
         </section>
 
-        <!-- 4. LIVE LOG VIEWER / TERMINAL CONSOLE -->
-        <section class="bg-gray-900/90 border border-gray-800 rounded-xl overflow-hidden shadow-sm">
-            <div class="px-5 py-3 border-b border-gray-800 flex items-center justify-between bg-[#0b0f19]">
-                <div class="flex items-center space-x-2">
-                    <div class="w-2.5 h-2.5 rounded-full bg-red-500"></div>
-                    <div class="w-2.5 h-2.5 rounded-full bg-yellow-500"></div>
-                    <div class="w-2.5 h-2.5 rounded-full bg-green-500"></div>
-                    <span class="ml-2 text-xs font-mono font-semibold text-gray-400 uppercase">Terminal de Operaciones en Vivo</span>
-                </div>
-                <div class="flex items-center space-x-3 text-xs">
-                    <label class="flex items-center space-x-1.5 text-gray-400 cursor-pointer select-none">
-                        <input type="checkbox" id="autoscroll-toggle" checked class="rounded bg-gray-800 border-gray-700 text-blue-600 focus:ring-0">
+        <!-- LIVE TERMINAL -->
+        <section class="glass overflow-hidden">
+            <div class="px-5 py-3 border-b border-white/10 flex items-center justify-between">
+                <h2 class="text-xs font-mono font-semibold uppercase tracking-wider text-slate-300">Terminal de Operaciones en Vivo</h2>
+                <div class="flex items-center gap-3 text-xs">
+                    <label class="flex items-center gap-1.5 text-slate-400 cursor-pointer select-none">
+                        <input type="checkbox" id="autoscroll-toggle" checked class="rounded bg-white/5 border-white/20 text-cyan-500 focus:ring-0">
                         <span>Auto-scroll</span>
                     </label>
-                    <button onclick="clearTerminalLogs()" class="text-gray-400 hover:text-gray-200 transition">
-                        Limpiar
-                    </button>
+                    <button onclick="clearTerminalLogs()" class="text-slate-400 hover:text-slate-100 transition">Limpiar</button>
                 </div>
             </div>
-
-            <!-- TERMINAL LOG OUTPUT -->
-            <div id="terminal-body" class="p-4 bg-[#070a12] font-mono text-[11px] leading-relaxed text-gray-300 h-64 overflow-y-auto space-y-1">
-                <div class="text-gray-500">// Terminal iniciada. Conectando con API de Alpaca y motor de Swing Trading...</div>
+            <div id="terminal-body" class="p-4 bg-black/30 font-mono text-[11px] leading-relaxed text-slate-300 h-64 overflow-y-auto space-y-0.5">
+                <div class="text-slate-500">// Terminal iniciada. Conectando con el motor...</div>
             </div>
         </section>
-
     </main>
 
-    <!-- FOOTER -->
-    <footer class="border-t border-gray-800/80 bg-[#090d16] py-4 px-6 text-center text-xs text-gray-500 font-mono">
-        Swing Trading Engine &copy; 2026 &bull; Conectado a Alpaca Markets API &bull; NYSE / NASDAQ 1D Timeframe
+    <footer class="px-6 pb-6 text-center text-[11px] text-slate-500 font-mono">
+        QuantBot Alpaca · Systematic Swing Engine · NYSE / NASDAQ 1D
     </footer>
 
-    <!-- JAVASCRIPT LOGIC -->
     <script>
-        // State variables
+        const REFRESH_MS = 10000;
         let isScanning = false;
-        let isBotActive = true;
-        let pollTimer = null;
+        let equityChart = null;
+        const lastHtml = {};  // tbody id -> last rendered html (skip DOM writes when unchanged: no flicker)
 
-        // Number formatter
-        const fmtUsd = (num) => {
-            if (num === null || num === undefined || isNaN(num)) return '$0.00';
-            return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
-        };
+        const esc = (v) => String(v ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+        const isNum = (n) => n !== null && n !== undefined && !isNaN(n);
+        const fmtUsd = (n) => isNum(n) ? new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n) : '--';
+        const fmtPct = (n, signed = true) => isNum(n) ? `${signed && n > 0 ? '+' : ''}${Number(n).toFixed(2)}%` : '--';
+        const fmtNum = (n, d = 2) => isNum(n) ? Number(n).toFixed(d) : '--';
+        const pnlClass = (n) => !isNum(n) || n === 0 ? 'text-slate-200' : (n > 0 ? 'text-emerald-400' : 'text-red-400');
 
-        const fmtPct = (num) => {
-            if (num === null || num === undefined || isNaN(num)) return '0.00%';
-            const sign = num > 0 ? '+' : '';
-            return `${sign}${Number(num).toFixed(2)}%`;
-        };
+        function setHtml(id, html) {
+            if (lastHtml[id] === html) return;
+            lastHtml[id] = html;
+            document.getElementById(id).innerHTML = html;
+        }
+        function setText(id, text, className) {
+            const el = document.getElementById(id);
+            if (el.textContent !== text) el.textContent = text;
+            if (className !== undefined && el.className !== className) el.className = className;
+        }
+        function feedback(msg) {
+            setText('action-feedback', msg);
+            if (msg) setTimeout(() => setText('action-feedback', ''), 5000);
+        }
 
-        // Fetch status and refresh dashboard
+        // ---------------------------------------------------------------- regime
+        function regimeStyle(regime, multiplier) {
+            if (regime === 'BULL_TREND') return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/40';
+            if (regime === 'RANGE_CHOP') return 'bg-amber-500/15 text-amber-300 border-amber-500/40';
+            if (multiplier === 0) return 'bg-red-500/20 text-red-300 border-red-500/50 animate-pulse';
+            return 'bg-red-500/10 text-red-300 border-red-500/30';
+        }
+        function renderRegimeBadge(reg) {
+            if (!reg) return;
+            const el = document.getElementById('regime-status-badge');
+            setText('regime-status-badge', reg.display_badge || reg.mode_text || reg.regime,
+                `px-2.5 py-1 rounded-full text-[11px] font-mono font-bold whitespace-nowrap border ${regimeStyle(reg.regime, reg.risk_multiplier)}`);
+            el.title = reg.description || '';
+        }
+
+        // ---------------------------------------------------------------- status
         async function fetchStatus() {
+            const t0 = performance.now();
             try {
                 const res = await fetch('/api/status');
+                const latency = Math.round(performance.now() - t0);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const data = await res.json();
+                setText('conn-latency', `${latency} ms`);
+                setText('conn-dot', '', 'relative inline-flex w-2.5 h-2.5 rounded-full ' + (data.is_active ? 'bg-emerald-500' : 'bg-amber-400'));
+                setText('conn-ping', '', 'absolute inline-flex w-full h-full rounded-full ping-soft ' + (data.is_active ? 'bg-emerald-400' : 'bg-amber-300'));
+                setText('bot-status-text', data.is_active ? 'ONLINE' : 'PAUSADO', 'font-semibold ' + (data.is_active ? 'text-emerald-300' : 'text-amber-300'));
+                setText('toggle-label', data.is_active ? 'Pausar' : 'Reanudar');
+                setText('toggle-circle', '', 'w-2 h-2 rounded-full ' + (data.is_active ? 'bg-emerald-400' : 'bg-amber-400'));
 
-                // Update Bot Status Indicator
-                isBotActive = data.is_active;
-                const statusDot = document.getElementById('bot-status-indicator');
-                const statusTxt = document.getElementById('bot-status-text');
-                const toggleCircle = document.getElementById('toggle-circle');
-                const toggleLabel = document.getElementById('toggle-label');
+                const acc = data.account || {};
+                setText('metric-equity', fmtUsd(acc.equity));
+                const pnl = acc.intraday_pnl;
+                const pnlPct = acc.last_equity > 0 ? (pnl / acc.last_equity) * 100 : null;
+                setText('metric-intraday-pnl', fmtUsd(pnl), pnlClass(pnl));
+                setText('metric-intraday-pnl-pct', isNum(pnlPct) ? `(${fmtPct(pnlPct)})` : '', pnlClass(pnl));
+                setText('metric-drawdown', fmtPct(acc.intraday_drawdown_pct, false),
+                    'text-2xl font-bold font-mono ' + (acc.kill_switch_active ? 'text-red-400' : 'text-white'));
+                setText('metric-ks-limit', data.risk_limits ? fmtPct(data.risk_limits.max_intraday_drawdown_pct, false) : '--');
+                setText('kill-switch-badge', acc.kill_switch_active ? 'KILL-SWITCH ACTIVO' : 'NORMAL',
+                    'px-2 py-0.5 text-[10px] font-mono font-bold rounded-full border ' + (acc.kill_switch_active
+                        ? 'bg-red-500/20 text-red-300 border-red-500/50 animate-pulse'
+                        : 'bg-emerald-500/10 text-emerald-300 border-emerald-500/30'));
 
-                if (isBotActive) {
-                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse-dot';
-                    statusTxt.className = 'font-mono font-semibold text-emerald-400';
-                    statusTxt.textContent = 'ONLINE';
-                    toggleCircle.className = 'w-2 h-2 rounded-full bg-emerald-400';
-                    toggleLabel.textContent = 'Pausar Bot';
-                } else {
-                    statusDot.className = 'w-2.5 h-2.5 rounded-full bg-rose-500';
-                    statusTxt.className = 'font-mono font-semibold text-rose-400';
-                    statusTxt.textContent = 'PAUSED';
-                    toggleCircle.className = 'w-2 h-2 rounded-full bg-rose-400';
-                    toggleLabel.textContent = 'Activar Bot';
-                }
-
-                // Update Account Metrics
-                if (data.account) {
-                    document.getElementById('metric-equity').textContent = fmtUsd(data.account.equity);
-                    document.getElementById('metric-cash').textContent = fmtUsd(data.account.cash);
-                    document.getElementById('metric-buying-power').textContent = fmtUsd(data.account.buying_power);
-                    document.getElementById('metric-last-equity').textContent = fmtUsd(data.account.last_equity);
-
-                    // PnL
-                    const pnlElem = document.getElementById('metric-intraday-pnl');
-                    const pnlPctElem = document.getElementById('metric-intraday-pnl-pct');
-                    const pnl = data.account.intraday_pnl || 0;
-                    const pnlPct = data.account.last_equity > 0 ? (pnl / data.account.last_equity) * 100 : 0;
-
-                    pnlElem.textContent = fmtUsd(pnl);
-                    pnlPctElem.textContent = fmtPct(pnlPct);
-
-                    if (pnl >= 0) {
-                        pnlElem.className = 'text-2xl font-bold font-mono text-emerald-400';
-                        pnlPctElem.className = 'text-xs font-mono font-semibold px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-400 border border-emerald-800/60';
-                    } else {
-                        pnlElem.className = 'text-2xl font-bold font-mono text-rose-400';
-                        pnlPctElem.className = 'text-xs font-mono font-semibold px-1.5 py-0.5 rounded bg-rose-950/80 text-rose-400 border border-rose-800/60';
-                    }
-
-                    // Drawdown & Kill-Switch
-                    const ddElem = document.getElementById('metric-drawdown');
-                    const ksBadge = document.getElementById('kill-switch-badge');
-                    ddElem.textContent = `${Number(data.account.intraday_drawdown_pct || 0).toFixed(2)}%`;
-
-                    if (data.account.kill_switch_active) {
-                        ksBadge.className = 'px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-rose-950 text-rose-400 border border-rose-800 animate-pulse';
-                        ksBadge.textContent = 'KILL-SWITCH ACTIVADO';
-                    } else {
-                        ksBadge.className = 'px-2 py-0.5 text-[10px] font-mono font-bold rounded bg-emerald-950 text-emerald-400 border border-emerald-800';
-                        ksBadge.textContent = 'NORMAL';
-                    }
-                }
-
-                // Next scan time
                 if (data.next_scan_time) {
-                    const nextDate = new Date(data.next_scan_time);
-                    document.getElementById('next-scan-display').textContent = nextDate.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' EST';
+                    const d = new Date(data.next_scan_time);
+                    setText('next-scan-display', 'Próximo escaneo ' + d.toLocaleString([], { weekday: 'short', hour: '2-digit', minute: '2-digit' }));
                 }
-
-                // Update Market Regime Status Badge
-                if (data.market_regime) {
-                    const reg = data.market_regime;
-                    const rBadge = document.getElementById('regime-status-badge');
-                    if (rBadge) {
-                        rBadge.textContent = reg.display_badge || reg.mode_text || reg.regime;
-                        if (reg.regime === 'BULL_TREND') {
-                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800 shadow-sm';
-                        } else if (reg.regime === 'RANGE_CHOP') {
-                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-amber-950 text-amber-300 border border-amber-800 shadow-sm';
-                        } else {
-                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-rose-950 text-rose-400 border border-rose-800 shadow-sm animate-pulse';
-                        }
-                    }
-                }
-
-                // Render Open Positions
+                renderRegimeBadge(data.market_regime);
                 renderPositions(data.positions || []);
-
             } catch (err) {
-                console.error("Error fetching status:", err);
+                setText('bot-status-text', 'DESCONECTADO', 'font-semibold text-red-300');
+                setText('conn-dot', '', 'relative inline-flex w-2.5 h-2.5 rounded-full bg-red-500');
+                setText('conn-ping', '', 'hidden');
+                setText('conn-latency', '-- ms');
+                console.error('status', err);
             }
         }
 
-        // Render Open Positions Table
-        function renderPositions(positions) {
-            const tbody = document.getElementById('positions-table-body');
-            document.getElementById('positions-badge-count').textContent = positions.length;
+        function stopBadge(p) {
+            if (!isNum(p.stop_loss) || !isNum(p.avg_entry_price) || p.avg_entry_price <= 0) return '';
+            const rel = (p.stop_loss - p.avg_entry_price) / p.avg_entry_price;
+            if (Math.abs(rel) <= 0.001) return '<span class="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">BREAKEVEN</span>';
+            if (rel > 0) return '<span class="ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">TRAILING</span>';
+            return '';
+        }
 
-            if (positions.length === 0) {
-                tbody.innerHTML = `
-                    <tr>
-                        <td colspan="9" class="py-8 text-center text-gray-500 font-sans">
-                            No hay posiciones abiertas en Alpaca en este momento.
-                        </td>
-                    </tr>
-                `;
+        function renderPositions(positions) {
+            setText('positions-badge-count', String(positions.length));
+            if (!positions.length) {
+                setHtml('positions-table-body', '<tr><td colspan="8" class="py-8 text-center text-slate-400 text-xs font-mono">Sin posiciones abiertas.</td></tr>');
                 return;
             }
-
-            let html = '';
-            for (const pos of positions) {
-                const plColor = pos.unrealized_pl >= 0 ? 'text-emerald-400' : 'text-rose-400';
-                const slText = pos.stop_loss ? fmtUsd(pos.stop_loss) : '<span class="text-gray-500">Pendiente</span>';
-                const tpText = pos.take_profit ? fmtUsd(pos.take_profit) : '<span class="text-gray-500">Pendiente</span>';
-
-                html += `
-                    <tr class="hover:bg-gray-800/40 transition">
-                        <td class="py-3 px-4 font-bold text-white">${pos.symbol}</td>
-                        <td class="py-3 px-4"><span class="px-1.5 py-0.5 text-[10px] rounded bg-emerald-950 text-emerald-400 border border-emerald-800">BUY</span></td>
-                        <td class="py-3 px-4 text-right">${pos.qty}</td>
-                        <td class="py-3 px-4 text-right">${fmtUsd(pos.avg_entry_price)}</td>
-                        <td class="py-3 px-4 text-right text-gray-200">${fmtUsd(pos.current_price)}</td>
-                        <td class="py-3 px-4 text-right text-gray-200">${fmtUsd(pos.market_value)}</td>
-                        <td class="py-3 px-4 text-right font-semibold ${plColor}">${fmtUsd(pos.unrealized_pl)} (${fmtPct(pos.unrealized_plpc)})</td>
-                        <td class="py-3 px-4 text-right text-rose-400">${slText}</td>
-                        <td class="py-3 px-4 text-right text-emerald-400">${tpText}</td>
-                    </tr>
-                `;
-            }
-            tbody.innerHTML = html;
+            setHtml('positions-table-body', positions.map((p) => {
+                const isShort = String(p.side || '').toLowerCase().includes('short');
+                const sideBadge = isShort
+                    ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-300 border border-red-500/30">SHORT</span>'
+                    : '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">LONG</span>';
+                return `
+                <tr class="hover:bg-white/5 transition-colors">
+                    <td class="py-3 px-4 font-bold text-white">${esc(p.symbol)}</td>
+                    <td class="py-3 px-3">${sideBadge}</td>
+                    <td class="py-3 px-3 text-right font-mono text-slate-200">${fmtNum(Math.abs(p.qty), 0)}</td>
+                    <td class="py-3 px-3 text-right font-mono text-slate-200">${fmtUsd(p.avg_entry_price)}</td>
+                    <td class="py-3 px-3 text-right font-mono text-cyan-300">${fmtUsd(p.current_price)}</td>
+                    <td class="py-3 px-3 text-right font-mono text-red-300 whitespace-nowrap">${fmtUsd(p.stop_loss)}${stopBadge(p)}</td>
+                    <td class="py-3 px-3 text-right font-mono text-emerald-300">${fmtUsd(p.take_profit)}</td>
+                    <td class="py-3 px-4 text-right font-mono whitespace-nowrap ${pnlClass(p.unrealized_pl)}">${fmtUsd(p.unrealized_pl)} <span class="text-xs opacity-80">(${fmtPct(p.unrealized_plpc)})</span></td>
+                </tr>`;
+            }).join(''));
         }
 
-        // Fetch latest scan signals
+        // ----------------------------------------------------------- performance
+        async function fetchPerformance() {
+            try {
+                const res = await fetch('/api/performance');
+                if (!res.ok) return;
+                const perf = await res.json();
+                setText('metric-total-pnl', fmtUsd(perf.total_pnl),
+                    'px-1.5 py-0.5 rounded-md bg-white/5 border border-white/10 ' + pnlClass(perf.total_pnl));
+                setText('metric-sharpe', fmtNum(perf.sharpe_ratio));
+                setText('metric-sortino', fmtNum(perf.sortino_ratio));
+                setText('metric-winrate', isNum(perf.win_rate_pct) ? `${fmtNum(perf.win_rate_pct, 1)}%` : '--');
+                setText('metric-pf', fmtNum(perf.profit_factor),
+                    'text-2xl font-bold font-mono ' + (!isNum(perf.profit_factor) ? 'text-white' : perf.profit_factor >= 1 ? 'text-emerald-400' : 'text-red-400'));
+                setText('metric-trades', String(perf.total_trades ?? 0));
+                setText('metric-maxdd', fmtPct(perf.max_drawdown_pct, false),
+                    'text-2xl font-bold font-mono ' + (perf.max_drawdown_pct > 0 ? 'text-red-400' : 'text-white'));
+                renderEquityChart(perf.equity_curve || []);
+            } catch (err) {
+                console.error('performance', err);
+            }
+        }
+
+        function renderEquityChart(curve) {
+            const empty = curve.length === 0;
+            document.getElementById('equity-chart-empty').classList.toggle('hidden', !empty);
+            setText('equity-chart-note', empty ? '' : `${curve.length} snapshots · último ${curve[curve.length - 1].date}`);
+            if (typeof Chart === 'undefined') return;
+
+            const labels = curve.map((p) => p.date);
+            const values = curve.map((p) => p.equity);
+            if (equityChart) {
+                equityChart.data.labels = labels;
+                equityChart.data.datasets[0].data = values;
+                equityChart.update('none');  // in-place update, no re-animation flicker
+                return;
+            }
+            const ctx = document.getElementById('equity-chart').getContext('2d');
+            equityChart = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels,
+                    datasets: [{
+                        label: 'Equity',
+                        data: values,
+                        borderColor: '#10B981',
+                        borderWidth: 2,
+                        pointRadius: 0,
+                        pointHoverRadius: 4,
+                        tension: 0.3,
+                        fill: true,
+                        backgroundColor: (c) => {
+                            const area = c.chart.chartArea;
+                            if (!area) return 'rgba(16,185,129,0.15)';
+                            const g = c.chart.ctx.createLinearGradient(0, area.top, 0, area.bottom);
+                            g.addColorStop(0, 'rgba(16,185,129,0.35)');
+                            g.addColorStop(1, 'rgba(16,185,129,0.0)');
+                            return g;
+                        },
+                    }],
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            backgroundColor: 'rgba(15,23,42,0.9)', borderColor: 'rgba(255,255,255,0.1)', borderWidth: 1,
+                            titleColor: '#cbd5e1', bodyColor: '#f1f5f9',
+                            callbacks: { label: (i) => ' ' + fmtUsd(i.parsed.y) },
+                        },
+                    },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#94a3b8', maxTicksLimit: 8, font: { family: 'ui-monospace', size: 10 } } },
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.05)' },
+                            ticks: { color: '#94a3b8', font: { family: 'ui-monospace', size: 10 }, callback: (v) => '$' + Number(v).toLocaleString('en-US') },
+                        },
+                    },
+                },
+            });
+        }
+
+        // ----------------------------------------------------------------- radar
         async function fetchSignals() {
             try {
                 const res = await fetch('/api/signals');
                 if (!res.ok) return;
                 const data = await res.json();
-
-                if (data.market_regime) {
-                    const reg = data.market_regime;
-                    const rBadge = document.getElementById('regime-status-badge');
-                    if (rBadge) {
-                        rBadge.textContent = reg.display_badge || reg.mode_text || reg.regime;
-                        if (reg.regime === 'BULL_TREND') {
-                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-emerald-950 text-emerald-400 border border-emerald-800 shadow-sm';
-                        } else if (reg.regime === 'RANGE_CHOP') {
-                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-amber-950 text-amber-300 border border-amber-800 shadow-sm';
-                        } else {
-                            rBadge.className = 'font-mono font-bold px-2.5 py-0.5 rounded text-[11px] bg-rose-950 text-rose-400 border border-rose-800 shadow-sm animate-pulse';
-                        }
-                    }
-                }
-
-                if (data.results && data.results.length > 0) {
-                    renderRadar(data.results, data.last_scan_time);
-                }
+                renderRegimeBadge(data.market_regime);
+                if (data.results && data.results.length) renderRadar(data.results, data.last_scan_time);
             } catch (err) {
-                console.error("Error fetching signals:", err);
+                console.error('signals', err);
             }
         }
 
-        // Render Market Scanner Radar Table
+        const pill = (cls, text, title = '') =>
+            `<span class="inline-block px-2.5 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap border ${cls}" title="${esc(title)}">${esc(text)}</span>`;
+
+        function newsLabel(item) {
+            if (item.news_safe !== false) return pill('bg-emerald-500/10 text-emerald-300 border-emerald-500/30', 'SAFE', 'News & Earnings Safe');
+            const r = (item.news_reason || '').toLowerCase();
+            let label = 'RISK';
+            if (r.includes('in 0d') || r.includes('in 1d') || r.includes('24h') || r.includes('tomorrow')) label = 'EARNINGS 24H';
+            else if (r.includes('in 2d') || r.includes('in 3d')) label = 'EARNINGS 2D';
+            else if (r.includes('earnings')) label = 'EARNINGS';
+            else if (r.includes('macro') || r.includes('fomc') || r.includes('cpi')) label = 'MACRO RISK';
+            return pill('bg-red-500/10 text-red-300 border-red-500/30', label, item.news_reason || 'Risk');
+        }
+
+        function regimePill(item) {
+            if (!item.regime) return '<span class="text-slate-500">-</span>';
+            const suffix = isNum(item.risk_pct) ? ` [${Number(item.risk_pct).toFixed(2)}%]` : '';
+            const name = item.regime === 'BULL_TREND' ? 'BULL TREND' : item.regime === 'RANGE_CHOP' ? 'RANGE'
+                : (item.risk_multiplier === 0 ? 'HALT' : 'DEFENSIVE');
+            return pill(regimeStyle(item.regime, item.risk_multiplier).replace('animate-pulse', ''), name + suffix, item.regime_mode || item.regime);
+        }
+
         function renderRadar(results, lastScanTime) {
-            const tbody = document.getElementById('radar-table-body');
-            document.getElementById('radar-count-badge').textContent = `${results.length} Tickers`;
+            setText('radar-count-badge', `${results.length} Tickers`);
+            if (lastScanTime) setText('radar-last-scan', new Date(lastScanTime).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }));
 
-            if (lastScanTime) {
-                const dt = new Date(lastScanTime);
-                document.getElementById('radar-last-scan').textContent = dt.toLocaleTimeString();
-            }
-
-            let html = '';
-            for (const item of results) {
+            setHtml('radar-table-body', results.map((item) => {
                 const isBuy = item.signal === 'BUY';
-                const signalBadge = isBuy
-                    ? '<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-bold whitespace-nowrap bg-emerald-950/80 text-emerald-400 border border-emerald-600/60 shadow-sm">BUY</span>'
-                    : '<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold whitespace-nowrap bg-gray-800/90 text-gray-400 border border-gray-700/50">HOLD</span>';
-
-                // RSI color code
-                let rsiColor = 'text-gray-300';
-                if (item.rsi <= 40) rsiColor = 'text-emerald-400 font-semibold';
-                else if (item.rsi >= 70) rsiColor = 'text-rose-400 font-semibold';
-
-                // ML Probability badge (crisp text-slate-100 font-mono font-medium, or text-emerald-400 font-semibold when >= 60%)
-                let mlBadge = '<span class="text-slate-400 font-mono text-xs">-</span>';
-                if (item.ml_prob !== undefined && item.ml_prob !== null) {
-                    const probVal = parseFloat(item.ml_prob).toFixed(1);
-                    if (item.ml_prob >= 60.0) {
-                        mlBadge = `<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-semibold font-mono text-emerald-400 bg-emerald-950/70 border border-emerald-600/60 shadow-sm">${probVal}%</span>`;
-                    } else {
-                        mlBadge = `<span class="inline-block px-2.5 py-0.5 rounded-md text-xs font-mono font-medium text-slate-100 bg-slate-800/80 border border-slate-700/60">${probVal}%</span>`;
-                    }
-                }
-
-                // News & Earnings badge ('SAFE' or 'MACRO RISK' / 'EARNINGS')
-                let newsBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-emerald-950/60 border border-emerald-700/50 text-emerald-300" title="News & Earnings Safe">SAFE</span>';
-                if (item.news_safe === false) {
-                    let riskLabel = 'RISK';
-                    const reason = (item.news_reason || '').toLowerCase();
-                    if (reason.includes('in 0d') || reason.includes('in 1d') || reason.includes('24h') || reason.includes('tomorrow')) {
-                        riskLabel = 'EARNINGS IN 24H';
-                    } else if (reason.includes('in 2d') || reason.includes('in 3d')) {
-                        riskLabel = 'EARNINGS IN 2D';
-                    } else if (reason.includes('earnings')) {
-                        riskLabel = 'EARNINGS';
-                    } else if (reason.includes('macro') || reason.includes('fomc') || reason.includes('cpi')) {
-                        riskLabel = 'MACRO RISK';
-                    }
-                    newsBadge = `<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-rose-950/60 border border-rose-700/50 text-rose-300" title="${item.news_reason || 'Risk'}">${riskLabel}</span>`;
-                }
-
-                // Market Regime badge (BULL_TREND, RANGE_CHOP, DEFENSIVE)
-                let regimeBadge = '<span class="text-slate-400 font-mono text-xs">-</span>';
-                if (item.regime) {
-                    if (item.regime === 'BULL_TREND') {
-                        regimeBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-emerald-950/50 border border-emerald-600/40 text-emerald-300" title="BULL TREND: 1.25% Risk | 3:1 RR">BULL TREND</span>';
-                    } else if (item.regime === 'RANGE_CHOP') {
-                        regimeBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-amber-950/50 border border-amber-600/40 text-amber-300" title="RANGE CHOP: 0.50% Risk | 1.5:1 RR">RANGE CHOP</span>';
-                    } else {
-                        regimeBadge = '<span class="inline-block px-2 py-0.5 text-xs font-semibold rounded-md whitespace-nowrap bg-rose-950/50 border border-rose-600/40 text-rose-300" title="DEFENSIVE: Entries Halted">DEFENSIVE</span>';
-                    }
-                }
-
-                let actionBadge = '';
-                if (item.executed) {
-                    actionBadge = `<span class="inline-block px-2 py-0.5 rounded-md text-[11px] font-bold whitespace-nowrap bg-emerald-900/80 text-emerald-300 border border-emerald-700">ORDEN ENVIADA (${item.shares} sh)</span>`;
-                } else if (item.status === 'REJECTED') {
-                    actionBadge = `<span class="inline-block px-2 py-0.5 rounded-md text-[11px] font-medium whitespace-nowrap bg-rose-950/60 text-rose-300 border border-rose-800/60">RECHAZADA</span>`;
-                } else {
-                    actionBadge = `<span class="text-gray-500 text-xs whitespace-nowrap">Sin acción</span>`;
-                }
-
-                html += `
-                    <tr class="hover:bg-gray-800/40 transition">
-                        <td class="py-2.5 px-3.5 font-bold text-white">${item.symbol}</td>
-                        <td class="py-2.5 px-3 text-right text-slate-100 font-mono">${fmtUsd(item.price)}</td>
-                        <td class="py-2.5 px-2.5 text-center font-mono ${rsiColor}">${item.rsi !== undefined ? item.rsi : '-'}</td>
-                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.ema_20 ? fmtUsd(item.ema_20) : '-'}</td>
-                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.ema_50 ? fmtUsd(item.ema_50) : '-'}</td>
-                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.ema_200 ? fmtUsd(item.ema_200) : '-'}</td>
-                        <td class="py-2.5 px-3 text-right text-gray-400 font-mono">${item.atr ? fmtUsd(item.atr) : '-'}</td>
-                        <td class="py-2.5 px-3 text-center min-w-[85px] whitespace-nowrap">${mlBadge}</td>
-                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[125px]">${newsBadge}</td>
-                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[110px]">${regimeBadge}</td>
-                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[70px]">${signalBadge}</td>
-                        <td class="py-2.5 px-3.5 font-sans text-xs text-gray-300 max-w-sm truncate whitespace-nowrap" title="${item.reason || ''}">${item.reason || '-'}</td>
-                        <td class="py-2.5 px-3 text-center whitespace-nowrap min-w-[110px]">${actionBadge}</td>
-                    </tr>
-                `;
-            }
-            tbody.innerHTML = html;
+                const signal = isBuy
+                    ? pill('bg-emerald-500/20 text-emerald-300 border-emerald-500/50', 'BUY')
+                    : pill('bg-white/5 text-slate-300 border-white/10', item.signal || 'HOLD');
+                const rsiCls = item.rsi <= 40 ? 'text-emerald-400 font-semibold' : item.rsi >= 70 ? 'text-red-400 font-semibold' : 'text-slate-200';
+                const ml = isNum(item.ml_prob)
+                    ? `<span class="font-mono font-bold ${item.ml_prob >= 60 ? 'text-emerald-300' : 'text-cyan-200'}">${fmtNum(item.ml_prob, 1)}%</span>`
+                    : '<span class="text-slate-500">-</span>';
+                let action = '<span class="text-slate-500 text-xs whitespace-nowrap">Sin acción</span>';
+                if (item.executed) action = pill('bg-emerald-500/20 text-emerald-200 border-emerald-500/50', `ORDEN ENVIADA (${item.shares} sh)`);
+                else if (item.status === 'REJECTED') action = pill('bg-red-500/10 text-red-300 border-red-500/30', 'RECHAZADA', item.reason);
+                return `
+                <tr class="hover:bg-white/5 transition-colors">
+                    <td class="py-2.5 px-4 font-bold text-white">${esc(item.symbol)}</td>
+                    <td class="py-2.5 px-3 text-right font-mono text-slate-100">${fmtUsd(item.price)}</td>
+                    <td class="py-2.5 px-3 text-center font-mono ${rsiCls}">${isNum(item.rsi) ? item.rsi : '-'}</td>
+                    <td class="py-2.5 px-3 text-right font-mono text-slate-300">${item.ema_20 ? fmtUsd(item.ema_20) : '-'}</td>
+                    <td class="py-2.5 px-3 text-right font-mono text-slate-300">${item.ema_50 ? fmtUsd(item.ema_50) : '-'}</td>
+                    <td class="py-2.5 px-3 text-right font-mono text-slate-300">${item.ema_200 ? fmtUsd(item.ema_200) : '-'}</td>
+                    <td class="py-2.5 px-3 text-right font-mono text-slate-300">${item.atr ? fmtUsd(item.atr) : '-'}</td>
+                    <td class="py-2.5 px-3 text-center bg-cyan-500/5">${ml}</td>
+                    <td class="py-2.5 px-3 text-center">${newsLabel(item)}</td>
+                    <td class="py-2.5 px-3 text-center">${regimePill(item)}</td>
+                    <td class="py-2.5 px-3 text-center">${signal}</td>
+                    <td class="py-2.5 px-3 text-xs text-slate-300 max-w-xs truncate" title="${esc(item.reason)}">${esc(item.reason || '-')}</td>
+                    <td class="py-2.5 px-4 text-center">${action}</td>
+                </tr>`;
+            }).join(''));
         }
 
-        // Trigger manual scan
+        // --------------------------------------------------------------- actions
         async function triggerManualScan() {
             if (isScanning) return;
             isScanning = true;
-
             const btn = document.getElementById('btn-scan-now');
-            const spinner = document.getElementById('scan-spinner');
-            const icon = document.getElementById('scan-icon');
-            const label = document.getElementById('scan-btn-label');
-
             btn.disabled = true;
-            spinner.classList.remove('hidden');
-            icon.classList.add('hidden');
-            label.textContent = 'Analizando mercado...';
-
+            document.getElementById('scan-spinner').classList.remove('hidden');
+            document.getElementById('scan-icon').classList.add('hidden');
+            setText('scan-btn-label', 'Analizando mercado...');
             try {
                 const res = await fetch('/api/scan-now', { method: 'POST' });
                 const data = await res.json();
-
-                if (res.status === 409) {
-                    alert(data.message || "Escaneo ya en curso");
-                } else if (data.results) {
-                    renderRadar(data.results, data.scan_time);
-                    await fetchStatus();
-                    await fetchLogs();
-                }
+                if (res.status === 409) feedback(data.message || 'Escaneo ya en curso');
+                else if (data.aborted) feedback(`Escaneo abortado: ${data.reason || ''}`);
+                if (data.results) renderRadar(data.results, data.scan_time);
+                await Promise.all([fetchStatus(), fetchPerformance(), fetchLogs()]);
             } catch (err) {
-                console.error("Error running scan:", err);
+                feedback('Error al ejecutar el escaneo');
+                console.error('scan', err);
             } finally {
                 isScanning = false;
                 btn.disabled = false;
-                spinner.classList.add('hidden');
-                icon.classList.remove('hidden');
-                label.textContent = 'Escanear Ahora';
+                document.getElementById('scan-spinner').classList.add('hidden');
+                document.getElementById('scan-icon').classList.remove('hidden');
+                setText('scan-btn-label', 'Escaneo Manual');
             }
         }
 
-        // Toggle Bot State
         async function toggleBotState() {
             try {
-                const res = await fetch('/api/toggle-bot', { method: 'POST' });
-                const data = await res.json();
-                await fetchStatus();
-                await fetchLogs();
+                await fetch('/api/toggle-bot', { method: 'POST' });
+                await Promise.all([fetchStatus(), fetchLogs()]);
             } catch (err) {
-                console.error("Error toggling bot:", err);
+                feedback('No se pudo cambiar el estado del bot');
+                console.error('toggle', err);
             }
         }
 
-        // Fetch logs for terminal
+        // ------------------------------------------------------------------ logs
         async function fetchLogs() {
             try {
                 const res = await fetch('/api/logs');
                 if (!res.ok) return;
                 const data = await res.json();
+                if (!data.logs || !data.logs.length) return;
+                const lvl = { WARNING: 'text-amber-300', ERROR: 'text-red-400 font-semibold', CRITICAL: 'text-red-400 font-bold' };
+                setHtml('terminal-body', data.logs.map((log) => `
+                    <div class="hover:bg-white/5 px-1 rounded flex gap-2">
+                        <span class="text-slate-500 shrink-0">[${esc(log.timestamp)}]</span>
+                        <span class="text-cyan-400 shrink-0 font-semibold">[${esc(log.level)}]</span>
+                        <span class="${lvl[log.level] || 'text-slate-300'} break-all">${esc(log.message)}</span>
+                    </div>`).join(''));
                 const term = document.getElementById('terminal-body');
-                const autoscroll = document.getElementById('autoscroll-toggle').checked;
-
-                if (!data.logs || data.logs.length === 0) return;
-
-                let html = '';
-                for (const log of data.logs) {
-                    let lvlClass = 'text-gray-300';
-                    if (log.level === 'INFO') lvlClass = 'text-gray-300';
-                    else if (log.level === 'WARNING') lvlClass = 'text-yellow-400 font-semibold';
-                    else if (log.level === 'ERROR' || log.level === 'CRITICAL') lvlClass = 'text-rose-400 font-bold';
-
-                    html += `
-                        <div class="hover:bg-gray-800/30 px-1 rounded flex space-x-2">
-                            <span class="text-gray-500 shrink-0">[${log.timestamp}]</span>
-                            <span class="text-blue-400 shrink-0 font-semibold">[${log.level}]</span>
-                            <span class="${lvlClass} break-all">${log.message}</span>
-                        </div>
-                    `;
-                }
-                term.innerHTML = html;
-
-                if (autoscroll) {
-                    term.scrollTop = term.scrollHeight;
-                }
+                if (document.getElementById('autoscroll-toggle').checked) term.scrollTop = term.scrollHeight;
             } catch (err) {
-                console.error("Error fetching logs:", err);
+                console.error('logs', err);
             }
         }
 
         function clearTerminalLogs() {
-            document.getElementById('terminal-body').innerHTML = '<div class="text-gray-500">// Terminal limpia. Esperando nuevos registros...</div>';
+            setHtml('terminal-body', '<div class="text-slate-500">// Terminal limpia. Esperando nuevos registros...</div>');
         }
 
-        // Initial setup and recurring polling
         window.addEventListener('DOMContentLoaded', () => {
             fetchStatus();
             fetchSignals();
+            fetchPerformance();
             fetchLogs();
-
-            // Refresh status & signals every 5s, logs every 3s
-            setInterval(fetchStatus, 5000);
-            setInterval(fetchSignals, 5000);
+            setInterval(fetchStatus, REFRESH_MS);
+            setInterval(fetchSignals, REFRESH_MS);
+            setInterval(fetchPerformance, REFRESH_MS);
             setInterval(fetchLogs, 3000);
         });
     </script>

@@ -36,6 +36,12 @@ class RiskConfig:
         atr_sl_multiplier: ATR multiplier for stop loss placement (1.5 * ATR(14)).
         max_position_equity_pct: Ceiling for position gross notional as % of portfolio.
         allow_fractional: Bracket orders in Alpaca require whole shares (False).
+        max_portfolio_correlation: Block BUYs whose return correlation vs any open position is >= this.
+        correlation_lookback_bars: Number of most recent aligned return bars used for the correlation.
+        enable_trailing_stop: Ratchet open positions' Stop Loss legs upward (breakeven + EMA trail).
+        breakeven_trigger_atr_multiple: Move stop to entry once price >= entry + this * ATR.
+        trailing_ema_period: Daily EMA used as structural trailing stop once price >= entry + activation R.
+        trailing_activation_r_multiple: Open profit (in R) at which the EMA/last-low trail activates.
     """
     max_risk_per_trade_pct: float = 0.01
     max_intraday_drawdown_pct: float = 0.025
@@ -43,6 +49,12 @@ class RiskConfig:
     atr_sl_multiplier: float = 1.5
     max_position_equity_pct: float = 0.30
     allow_fractional: bool = False
+    max_portfolio_correlation: float = 0.75
+    correlation_lookback_bars: int = 60
+    enable_trailing_stop: bool = True
+    breakeven_trigger_atr_multiple: float = 1.0
+    trailing_ema_period: int = 20
+    trailing_activation_r_multiple: float = 1.5
 
 
 @dataclass(frozen=True)
@@ -60,6 +72,8 @@ class StrategyConfig:
         rsi_lookback: Number of bars evaluated for RSI bounce detection.
         pullback_lookback: Lookback window in bars to confirm EMA(20) test.
         pullback_tolerance_pct: Price tolerance percentage when testing EMA(20).
+        ml_min_probability: Minimum ML success probability required to confirm a BUY.
+        ml_model_path: Path of the persisted LightGBM model.
     """
     ema_fast: int = 20
     ema_medium: int = 50
@@ -71,6 +85,8 @@ class StrategyConfig:
     rsi_lookback: int = 3
     pullback_lookback: int = 3
     pullback_tolerance_pct: float = 0.01
+    ml_min_probability: float = 0.60
+    ml_model_path: str = "models/stock_lgbm_model.joblib"
 
 
 @dataclass(frozen=True)
@@ -138,6 +154,12 @@ def load_config() -> AppConfig:
         atr_sl_multiplier=float(os.getenv("ATR_SL_MULTIPLIER", "1.5")),
         max_position_equity_pct=float(os.getenv("MAX_POSITION_EQUITY_PCT", "0.30")),
         allow_fractional=os.getenv("ALLOW_FRACTIONAL", "False").strip().lower() in ("true", "1"),
+        max_portfolio_correlation=float(os.getenv("MAX_PORTFOLIO_CORRELATION", "0.75")),
+        correlation_lookback_bars=int(os.getenv("CORRELATION_LOOKBACK_BARS", "60")),
+        enable_trailing_stop=os.getenv("ENABLE_TRAILING_STOP", "True").strip().lower() in ("true", "1"),
+        breakeven_trigger_atr_multiple=float(os.getenv("BREAKEVEN_TRIGGER_ATR_MULTIPLE", "1.0")),
+        trailing_ema_period=int(os.getenv("TRAILING_EMA_PERIOD", "20")),
+        trailing_activation_r_multiple=float(os.getenv("TRAILING_ACTIVATION_R_MULTIPLE", "1.5")),
     )
 
     strategy_cfg = StrategyConfig(
@@ -147,6 +169,8 @@ def load_config() -> AppConfig:
         atr_period=int(os.getenv("ATR_PERIOD", "14")),
         rsi_period=int(os.getenv("RSI_PERIOD", "14")),
         rsi_threshold=float(os.getenv("RSI_THRESHOLD", "40.0")),
+        ml_min_probability=float(os.getenv("ML_MIN_PROBABILITY", "0.60")),
+        ml_model_path=os.getenv("ML_MODEL_PATH", "models/stock_lgbm_model.joblib"),
     )
 
     execution_cfg = ExecutionConfig(

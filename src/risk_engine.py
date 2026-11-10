@@ -1,9 +1,12 @@
 """Adaptive Risk Management Engine (Regime-Switching Position Sizing).
 
-Dynamically allocates trade risk and profit targets according to active market regime:
-1. BULL_TREND (AGRESIVO): Risk per trade = 1.25%, Risk:Reward Target = 3:1.
-2. RANGE_CHOP (CONSERVADOR): Risk per trade = 0.50%, Risk:Reward Target = 1.5:1.
-3. HIGH_VOLATILITY_DEFENSIVE (PROTECCIÓN): Risk per trade = 0.0%, New entries blocked.
+Risk per trade = base max_risk_per_trade_pct * regime risk_multiplier (continuous, 0.0 - 1.25).
+The multiplier comes from signal.risk_multiplier (set by MarketRegimeDetector via the strategy);
+when absent, the regime's default below is used:
+1. BULL_TREND (AGRESIVO): multiplier 1.25, Risk:Reward Target = 3:1.
+2. RANGE_CHOP (MODERADO): multiplier 0.75, Risk:Reward Target = 1.5:1.
+3. HIGH_VOLATILITY_DEFENSIVE (DEFENSIVO ACTIVO): multiplier 0.40, Risk:Reward Target = 2:1.
+A multiplier of 0.0 is an absolute regime halt.
 
 Enforces immutable circuit breakers:
 - Intraday Drawdown maximum capped strictly at 2.5%.
@@ -24,24 +27,9 @@ logger = logging.getLogger(__name__)
 
 # Regime parameter dictionary
 REGIME_RISK_SPECS = {
-    MarketRegime.BULL_TREND: {
-        "mode": "AGRESIVO (1.25%)",
-        "risk_per_trade_pct": 0.0125,
-        "risk_reward_ratio": 3.0,
-        "allow_entries": True,
-    },
-    MarketRegime.RANGE_CHOP: {
-        "mode": "CONSERVADOR (0.5%)",
-        "risk_per_trade_pct": 0.0050,
-        "risk_reward_ratio": 1.5,
-        "allow_entries": True,
-    },
-    MarketRegime.HIGH_VOLATILITY_DEFENSIVE: {
-        "mode": "DEFENSIVE [OFF]",
-        "risk_per_trade_pct": 0.0,
-        "risk_reward_ratio": 0.0,
-        "allow_entries": False,
-    },
+    MarketRegime.BULL_TREND: {"risk_multiplier": 1.25, "risk_reward_ratio": 3.0},
+    MarketRegime.RANGE_CHOP: {"risk_multiplier": 0.75, "risk_reward_ratio": 1.5},
+    MarketRegime.HIGH_VOLATILITY_DEFENSIVE: {"risk_multiplier": 0.40, "risk_reward_ratio": 2.0},
 }
 
 
@@ -111,9 +99,9 @@ class AdaptiveRiskEngine:
         """Compute regime-adaptive position sizing and bracket order targets.
 
         Formula:
-            risk_pct = 1.25% (BULL_TREND) | 0.50% (RANGE_CHOP) | 0.0% (DEFENSIVE)
-            rr_ratio = 3.0:1 (BULL_TREND) | 1.5:1 (RANGE_CHOP)
-            risk_dollars = equity * risk_pct
+            effective_risk_pct = max_risk_per_trade_pct * risk_multiplier
+            rr_ratio = 3.0:1 (BULL_TREND) | 1.5:1 (RANGE_CHOP) | 2.0:1 (DEFENSIVE)
+            risk_dollars = equity * effective_risk_pct
             sl_distance = 1.5 * ATR(14)
             stop_loss_price = entry_price - sl_distance
             take_profit_price = entry_price + (rr_ratio * sl_distance)
@@ -153,9 +141,12 @@ class AdaptiveRiskEngine:
                 risk_pct_used=0.0,
             )
 
-        # 2. Defensive Regime Check
+        # 2. Regime risk multiplier (continuous); 0.0 = absolute halt
         regime_spec = REGIME_RISK_SPECS.get(regime, REGIME_RISK_SPECS[MarketRegime.RANGE_CHOP])
-        if not regime_spec["allow_entries"] or regime == MarketRegime.HIGH_VOLATILITY_DEFENSIVE:
+        risk_multiplier = (
+            signal.risk_multiplier if signal.risk_multiplier is not None else regime_spec["risk_multiplier"]
+        )
+        if risk_multiplier <= 0.0:
             return PositionSize(
                 symbol=symbol,
                 shares=0.0,
@@ -169,7 +160,7 @@ class AdaptiveRiskEngine:
                 risk_reward_ratio=0.0,
                 total_exposure_usd=0.0,
                 is_valid=False,
-                rejection_reason="Market Regime is HIGH_VOLATILITY_DEFENSIVE: Entries halted for capital protection (Risk 0.0%).",
+                rejection_reason="Regime absolute halt: Extreme market volatility",
                 regime=regime.value,
                 risk_pct_used=0.0,
             )
@@ -214,7 +205,7 @@ class AdaptiveRiskEngine:
             )
 
         # 4. Adaptive Parameters
-        risk_pct = regime_spec["risk_per_trade_pct"]
+        risk_pct = self.config.max_risk_per_trade_pct * risk_multiplier
         rr_target = regime_spec["risk_reward_ratio"]
 
         # Calculate Stop Loss distance (1.5 * ATR(14))

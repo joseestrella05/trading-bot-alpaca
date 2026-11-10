@@ -134,7 +134,7 @@ class SwingTrendFollowingStrategy:
                 prev_high=0.0,
                 reason=f"Insufficient history: {len(df) if df is not None else 0} bars available, {min_required_bars} required.",
                 regime=MarketRegime.RANGE_CHOP.value,
-                regime_mode="CONSERVADOR (0.5%)",
+                regime_mode="MODERADO (0.75%)",
             )
 
         indicators_df = self.calculate_indicators(df)
@@ -188,8 +188,12 @@ class SwingTrendFollowingStrategy:
             except Exception as exc:
                 logger.warning("Asset regime detection failed for %s: %s", symbol, exc)
 
-        # A) Check Macro Benchmark Defensive Mode
-        if macro_regime is not None and macro_regime.regime == MarketRegime.HIGH_VOLATILITY_DEFENSIVE:
+        # A) Governing regime = most conservative (lowest risk multiplier) of macro and asset.
+        analyses = [r for r in (macro_regime, asset_regime) if r is not None]
+        governing = min(analyses, key=lambda r: r.risk_multiplier) if analyses else None
+
+        if governing is not None and governing.risk_multiplier <= 0.0:
+            scope = "Benchmark SPY Macro" if governing is macro_regime else f"{symbol} Asset"
             return TradingSignal(
                 symbol=symbol,
                 signal_type=SignalType.HOLD,
@@ -202,48 +206,24 @@ class SwingTrendFollowingStrategy:
                 rsi_14=rsi_14,
                 atr_14=atr_14,
                 prev_high=prev_high,
-                reason=f"HOLD - Market Regime Defensive (Benchmark SPY Macro: {macro_regime.description[:70]})",
+                reason=f"HOLD - Regime absolute halt ({scope}: {governing.description[:70]})",
                 ml_probability=ml_prob,
                 news_safe=news_safe,
                 news_reason=news_reason,
-                regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE.value,
-                regime_mode="DEFENSIVE [OFF]",
+                regime=governing.regime.value,
+                regime_mode=governing.mode_text,
+                risk_multiplier=0.0,
             )
 
-        # B) Check Individual Asset Defensive Mode
-        if asset_regime is not None and asset_regime.regime == MarketRegime.HIGH_VOLATILITY_DEFENSIVE:
-            return TradingSignal(
-                symbol=symbol,
-                signal_type=SignalType.HOLD,
-                timestamp=timestamp,
-                close_price=close_price,
-                entry_price=close_price,
-                ema_20=ema_20,
-                ema_50=ema_50,
-                ema_200=ema_200,
-                rsi_14=rsi_14,
-                atr_14=atr_14,
-                prev_high=prev_high,
-                reason=f"HOLD - Market Regime Defensive ({symbol} Asset: {asset_regime.description[:70]})",
-                ml_probability=ml_prob,
-                news_safe=news_safe,
-                news_reason=news_reason,
-                regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE.value,
-                regime_mode="DEFENSIVE [OFF]",
-            )
-
-        # C) Determine Active Regime (BULL_TREND vs RANGE_CHOP)
-        # If either macro or individual asset is in RANGE_CHOP, use conservative parameters
-        is_range = (
-            (macro_regime is not None and macro_regime.regime == MarketRegime.RANGE_CHOP)
-            or (asset_regime is not None and asset_regime.regime == MarketRegime.RANGE_CHOP)
-        )
-        if is_range:
-            active_regime_str = MarketRegime.RANGE_CHOP.value
-            active_mode_str = "CONSERVADOR (0.5%)"
+        # B) Active regime parameters (default BULL_TREND when no regime analysis is available)
+        if governing is not None:
+            active_regime_str = governing.regime.value
+            active_mode_str = governing.mode_text
+            active_multiplier: Optional[float] = governing.risk_multiplier
         else:
             active_regime_str = MarketRegime.BULL_TREND.value
             active_mode_str = "AGRESIVO (1.25%)"
+            active_multiplier = None
 
         # -------------------------------------------------------------
         # 1. Filtro de Tendencia (Macro Trend Alignment)
@@ -276,6 +256,7 @@ class SwingTrendFollowingStrategy:
                 news_reason=news_reason,
                 regime=active_regime_str,
                 regime_mode=active_mode_str,
+                risk_multiplier=active_multiplier,
             )
 
         # -------------------------------------------------------------
@@ -312,6 +293,7 @@ class SwingTrendFollowingStrategy:
                 news_reason=news_reason,
                 regime=active_regime_str,
                 regime_mode=active_mode_str,
+                risk_multiplier=active_multiplier,
             )
 
         # -------------------------------------------------------------
@@ -338,6 +320,7 @@ class SwingTrendFollowingStrategy:
                 news_reason=news_reason,
                 regime=active_regime_str,
                 regime_mode=active_mode_str,
+                risk_multiplier=active_multiplier,
             )
 
         # -------------------------------------------------------------
@@ -376,6 +359,7 @@ class SwingTrendFollowingStrategy:
                 news_reason=news_reason,
                 regime=active_regime_str,
                 regime_mode=active_mode_str,
+                risk_multiplier=active_multiplier,
             )
 
         # -------------------------------------------------------------
@@ -400,6 +384,7 @@ class SwingTrendFollowingStrategy:
                 news_reason=news_reason,
                 regime=active_regime_str,
                 regime_mode=active_mode_str,
+                risk_multiplier=active_multiplier,
             )
 
         # -------------------------------------------------------------
@@ -425,6 +410,7 @@ class SwingTrendFollowingStrategy:
                 news_reason=news_reason,
                 regime=active_regime_str,
                 regime_mode=active_mode_str,
+                risk_multiplier=active_multiplier,
             )
 
         # -------------------------------------------------------------
@@ -459,4 +445,5 @@ class SwingTrendFollowingStrategy:
             news_reason=news_reason,
             regime=active_regime_str,
             regime_mode=active_mode_str,
+            risk_multiplier=active_multiplier,
         )

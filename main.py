@@ -17,6 +17,9 @@ import sys
 import time
 from typing import Any, Dict, List, Optional
 
+import numpy as np
+import pandas as pd
+
 CACHE_FILE_PATH = Path(__file__).resolve().parent / "data" / "last_scan_cache.json"
 
 from config import AppConfig, load_config
@@ -29,6 +32,7 @@ from strategy import SwingTrendFollowingStrategy
 from news_filter import NewsFilter
 from ml_model import StockMLPredictor
 from regime_detector import MarketRegimeDetector, RegimeAnalysis
+from src.performance_auditor import PerformanceAuditor
 
 
 def setup_logger(log_level_str: str) -> logging.Logger:
@@ -60,15 +64,18 @@ class SwingTradingBot:
         # 1. Initialize News & Earnings filter
         self.news_filter = NewsFilter()
 
-        # 2. Initialize Machine Learning Random Forest predictor
-        self.ml_predictor = StockMLPredictor()
+        # 2. Initialize Machine Learning LightGBM predictor
+        self.ml_predictor = StockMLPredictor(
+            model_path=config.strategy.ml_model_path,
+            approval_threshold=config.strategy.ml_min_probability,
+        )
         try:
             self.ml_predictor.ensure_model_ready(self.data_provider)
         except Exception as exc:
             self.logger.warning("Could not auto-train or verify ML model on startup: %s", exc)
 
         # 3. Initialize Market Regime Detection Engine
-        self.regime_detector = MarketRegimeDetector()
+        self.regime_detector = MarketRegimeDetector(base_risk_pct=config.risk.max_risk_per_trade_pct)
         self.current_macro_regime: Optional[RegimeAnalysis] = None
         try:
             spy_df = self.data_provider.get_daily_bars("SPY", lookback_days=400)
@@ -87,6 +94,7 @@ class SwingTradingBot:
         )
 
         self.risk_manager = RiskManager(config.risk)
+        self.auditor = PerformanceAuditor()
         self.risk_engine = AdaptiveRiskEngine(config.risk)
         self.execution_handler = AlpacaExecutionHandler(
             alpaca_config=config.alpaca,
@@ -162,6 +170,7 @@ class SwingTradingBot:
                 "display_badge": self.current_macro_regime.display_badge,
                 "risk_per_trade_pct": round(self.current_macro_regime.risk_per_trade_pct * 100, 2),
                 "risk_reward_ratio": self.current_macro_regime.risk_reward_ratio,
+                "risk_multiplier": self.current_macro_regime.risk_multiplier,
                 "atr_percentile": self.current_macro_regime.atr_percentile,
                 "adx_14": round(self.current_macro_regime.adx_14, 1),
                 "description": self.current_macro_regime.description,
@@ -173,6 +182,7 @@ class SwingTradingBot:
             "mode_text": "AGRESIVO (1.25%)",
             "display_badge": "BULL TREND [AGRESIVO (1.25%)]",
             "risk_per_trade_pct": 1.25,
+            "risk_multiplier": 1.25,
             "risk_reward_ratio": 3.0,
             "atr_percentile": 24.0,
             "adx_14": 10.5,
@@ -184,6 +194,7 @@ class SwingTradingBot:
         symbol: str,
         account: AccountState,
         active_symbols: set[str],
+        open_positions_returns: Optional[Dict[str, pd.Series]] = None,
     ) -> tuple[TradingSignal, Optional[PositionSize], Optional[ExecutionResult]]:
         """Run the quantitative pipeline on a single symbol.
 
@@ -191,6 +202,7 @@ class SwingTradingBot:
             symbol: Market ticker.
             account: Current account health state.
             active_symbols: Set of symbols with current exposure or pending orders.
+            open_positions_returns: Log returns of open positions for the correlation gate.
 
         Returns:
             Tuple of (TradingSignal, PositionSize or None, ExecutionResult or None)
@@ -262,7 +274,13 @@ class SwingTradingBot:
         active_regime = MarketRegime(signal.regime) if signal.regime else (
             self.current_macro_regime.regime if self.current_macro_regime else MarketRegime.BULL_TREND
         )
-        position_size = self.risk_manager.calculate_position_size(signal, account, regime=active_regime)
+        position_size = self.risk_manager.calculate_position_size(
+            signal,
+            account,
+            regime=active_regime,
+            candidate_returns=np.log(df["close"]).diff().dropna(),
+            open_positions_returns=open_positions_returns,
+        )
         if not position_size.is_valid:
             self.logger.warning(
                 "[%s] Sizing rejected by RiskManager: %s",
@@ -289,6 +307,21 @@ class SwingTradingBot:
         # 5. Order Execution (Bracket Order)
         exec_result = self.execution_handler.submit_bracket_order(position_size)
         return signal, position_size, exec_result
+
+    def sync_trade_history(self, max_age_seconds: Optional[float] = None) -> None:
+        """Reconcile closed Alpaca trades into the audit DB. Never raises (must not break a scan).
+
+        Args:
+            max_age_seconds: If set, skip when the last sync is more recent than this.
+        """
+        try:
+            client = self.execution_handler.trading_client
+            if max_age_seconds is None:
+                self.auditor.sync_closed_trades_from_alpaca(client)
+            else:
+                self.auditor.sync_if_stale(client, max_age_seconds=max_age_seconds)
+        except Exception as exc:
+            self.logger.error("Closed-trade sync with Alpaca failed: %s", exc, exc_info=True)
 
     def run_scan(self, symbols: Optional[List[str]] = None) -> Dict[str, Any]:
         """Execute a full market scan over target tickers.
@@ -317,6 +350,9 @@ class SwingTradingBot:
 
         self.is_scanning = True
         try:
+            # Audit: pull trades closed since the last cycle (TP/SL/trailing/manual) before scanning.
+            self.sync_trade_history()
+
             # 0. Analyze benchmark SPY for macro market regime
             try:
                 spy_df = self.data_provider.get_daily_bars("SPY", lookback_days=400)
@@ -342,6 +378,31 @@ class SwingTradingBot:
                 account.intraday_drawdown_pct * 100,
             )
 
+            try:
+                self.auditor.record_daily_equity(account.equity, account.cash, account.buying_power)
+            except Exception as exc:
+                self.logger.error("Failed to record equity snapshot: %s", exc)
+
+            # 1b. Open positions: one bars download feeds trailing stops and the correlation gate.
+            open_positions_returns: Dict[str, pd.Series] = {}
+            try:
+                positions = self.execution_handler.get_positions_with_bracket_legs()
+                position_bars = {
+                    p["symbol"]: self.data_provider.get_daily_bars(p["symbol"], lookback_days=400)
+                    for p in positions
+                }
+                open_positions_returns = {
+                    sym: np.log(bars["close"]).diff().dropna()
+                    for sym, bars in position_bars.items()
+                    if not bars.empty
+                }
+                # Runs before the kill-switch abort: raising stops only reduces risk.
+                self.execution_handler.update_open_positions_trailing_stops(
+                    positions, self.data_provider, bars_by_symbol=position_bars
+                )
+            except Exception as exc:
+                self.logger.error("Failed to process open positions (trailing/correlation): %s", exc, exc_info=True)
+
             if account.kill_switch_active:
                 self.logger.critical(
                     "ABORTING SCAN: Intraday Drawdown Kill-Switch is active (%.2f%% >= %.2f%%).",
@@ -366,7 +427,9 @@ class SwingTradingBot:
             # 3. Process each ticker
             for sym in scan_symbols:
                 try:
-                    signal, pos_size, exec_res = self.scan_symbol(sym, account, active_symbols)
+                    signal, pos_size, exec_res = self.scan_symbol(
+                        sym, account, active_symbols, open_positions_returns=open_positions_returns
+                    )
                     ml_prob_pct = round(signal.ml_probability * 100, 1) if signal.ml_probability is not None else None
                     results_summary.append({
                         "symbol": sym,
@@ -382,6 +445,11 @@ class SwingTradingBot:
                         "news_reason": signal.news_reason,
                         "regime": signal.regime or (self.current_macro_regime.regime.value if self.current_macro_regime else "BULL_TREND"),
                         "regime_mode": signal.regime_mode or (self.current_macro_regime.mode_text if self.current_macro_regime else "AGRESIVO (1.25%)"),
+                        "risk_multiplier": signal.risk_multiplier,
+                        "risk_pct": (
+                            round(self.config.risk.max_risk_per_trade_pct * signal.risk_multiplier * 100, 2)
+                            if signal.risk_multiplier is not None else None
+                        ),
                         "shares": int(pos_size.shares) if pos_size else 0,
                         "stop_loss": pos_size.stop_loss_price if pos_size else None,
                         "take_profit": pos_size.take_profit_price if pos_size else None,

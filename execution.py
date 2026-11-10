@@ -8,9 +8,11 @@ stop loss, and take profit legs simultaneously.
 from __future__ import annotations
 
 import logging
+import math
 import uuid
 from typing import Any, Dict, List, Optional, Set
 
+import pandas as pd
 from alpaca.common.exceptions import APIError
 from alpaca.trading.client import TradingClient
 from alpaca.trading.enums import OrderClass, OrderSide, QueryOrderStatus, TimeInForce
@@ -18,6 +20,7 @@ from alpaca.trading.requests import (
     GetOrdersRequest,
     LimitOrderRequest,
     MarketOrderRequest,
+    ReplaceOrderRequest,
     StopLossRequest,
     TakeProfitRequest,
 )
@@ -27,6 +30,15 @@ from models import AccountState, ExecutionResult, PositionSize
 from risk_manager import RiskManager
 
 logger = logging.getLogger(__name__)
+
+
+def _wilder_atr(df: pd.DataFrame, period: int = 14) -> float:
+    """Wilder's ATR on the last bar, same formula as the strategy's indicator."""
+    prev_close = df["close"].shift(1)
+    true_range = pd.concat(
+        [df["high"] - df["low"], (df["high"] - prev_close).abs(), (df["low"] - prev_close).abs()], axis=1
+    ).max(axis=1)
+    return float(true_range.ewm(alpha=1.0 / period, adjust=False).mean().iloc[-1])
 
 
 class AlpacaExecutionHandler:
@@ -58,6 +70,11 @@ class AlpacaExecutionHandler:
             "AlpacaExecutionHandler initialized in %s mode",
             "PAPER" if alpaca_config.paper else "LIVE",
         )
+
+    @property
+    def trading_client(self) -> TradingClient:
+        """Underlying Alpaca TradingClient (read-only use, e.g. trade history sync)."""
+        return self._client
 
     def get_account_state(self) -> AccountState:
         """Retrieve real-time account balances and evaluate health status.
@@ -128,6 +145,7 @@ class AlpacaExecutionHandler:
 
                 if getattr(ord_item, "stop_price", None) is not None:
                     orders_by_symbol[sym]["stop_loss"] = float(ord_item.stop_price)
+                    orders_by_symbol[sym]["stop_order_id"] = str(ord_item.id)
                 elif getattr(ord_item, "limit_price", None) is not None and ord_item.side == OrderSide.SELL:
                     orders_by_symbol[sym]["take_profit"] = float(ord_item.limit_price)
         except Exception as exc:
@@ -150,8 +168,83 @@ class AlpacaExecutionHandler:
                 "change_today": float(pos.change_today) * 100.0 if getattr(pos, "change_today", None) is not None else 0.0,
                 "stop_loss": legs.get("stop_loss"),
                 "take_profit": legs.get("take_profit"),
+                "stop_order_id": legs.get("stop_order_id"),
             })
         return results
+
+    def update_open_positions_trailing_stops(
+        self,
+        positions: List[Dict[str, Any]],
+        data_provider: Any,
+        bars_by_symbol: Optional[Dict[str, pd.DataFrame]] = None,
+    ) -> Dict[str, float]:
+        """Ratchet Stop Loss legs of winning long positions upward. Never lowers a stop.
+
+        1. price >= entry + breakeven_trigger_atr_multiple * ATR and stop < entry -> stop = entry.
+        2. price >= entry + trailing_activation_r_multiple * R (R = atr_sl_multiplier * ATR) -> stop = max(EMA, last closed low)
+           when that level is above the current stop and below the market.
+
+        Args:
+            positions: Output of get_positions_with_bracket_legs().
+            data_provider: Used to download daily bars missing from bars_by_symbol.
+            bars_by_symbol: Optional pre-fetched daily bars keyed by symbol.
+
+        Returns:
+            {symbol: new_stop} for every stop raised (or that would be raised in dry-run).
+        """
+        cfg = self.risk_manager.config
+        updated: Dict[str, float] = {}
+        if not cfg.enable_trailing_stop:
+            return updated
+
+        today = pd.Timestamp.now(tz="America/New_York").date()
+        for pos in positions:
+            sym = pos["symbol"]
+            entry = pos["avg_entry_price"]
+            price = pos["current_price"]
+            stop = pos.get("stop_loss")
+            order_id = pos.get("stop_order_id")
+            # Only long positions in profit with a live stop leg are eligible.
+            if pos["qty"] <= 0 or stop is None or order_id is None or price <= entry:
+                continue
+
+            df = (bars_by_symbol or {}).get(sym)
+            if df is None or df.empty:
+                df = data_provider.get_daily_bars(sym, lookback_days=400)
+            if df is None or df.empty:
+                logger.warning("[%s] Trailing stop skipped: no daily bars.", sym)
+                continue
+            closed = df[df.index.date < today]  # ignore today's in-progress bar
+            if len(closed) < cfg.trailing_ema_period:
+                continue
+
+            atr = _wilder_atr(closed)
+            ema = float(closed["close"].ewm(span=cfg.trailing_ema_period, adjust=False).mean().iloc[-1])
+            last_low = float(closed["low"].iloc[-1])
+
+            new_stop = stop
+            if price >= entry + cfg.breakeven_trigger_atr_multiple * atr and stop < entry:
+                new_stop = entry
+            if price >= entry + cfg.trailing_activation_r_multiple * cfg.atr_sl_multiplier * atr:
+                new_stop = max([new_stop] + [lvl for lvl in (ema, last_low) if lvl < price])
+            new_stop = math.floor(new_stop * 100) / 100  # floor keeps the stop at/below the computed level
+            if new_stop <= stop:
+                continue
+
+            if self.execution_config.dry_run:
+                logger.info("[DRY RUN] [%s] Would raise stop $%.2f -> $%.2f", sym, stop, new_stop)
+                updated[sym] = new_stop
+                continue
+            try:
+                self._client.replace_order_by_id(order_id, ReplaceOrderRequest(stop_price=new_stop))
+                logger.info("[%s] Stop raised $%.2f -> $%.2f (price $%.2f)", sym, stop, new_stop, price)
+                updated[sym] = new_stop
+            except APIError as exc:
+                # e.g. 422 when the leg is already filling/filled; retry on next cycle.
+                logger.warning("[%s] Alpaca rejected stop replace (%s): %s", sym, order_id, exc)
+            except Exception as exc:
+                logger.error("[%s] Unexpected error replacing stop %s: %s", sym, order_id, exc)
+        return updated
 
     def has_open_position_or_order(self, symbol: str) -> bool:
         """Check if a ticker is already in portfolio or has pending orders.

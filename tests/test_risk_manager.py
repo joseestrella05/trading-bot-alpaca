@@ -13,6 +13,9 @@ import math
 import unittest
 from datetime import datetime
 
+import numpy as np
+import pandas as pd
+
 from config import RiskConfig
 from models import AccountState, SignalType, TradingSignal
 from risk_manager import RiskManager
@@ -210,6 +213,67 @@ class TestRiskManager(unittest.TestCase):
         self.assertFalse(pos.is_valid)
         self.assertEqual(pos.shares, 0.0)
         self.assertIn("< 1.0 share", pos.rejection_reason)
+
+
+class TestPortfolioCorrelationGate(unittest.TestCase):
+    def setUp(self):
+        self.rm = RiskManager(RiskConfig(max_portfolio_correlation=0.75, correlation_lookback_bars=60))
+        self.account = AccountState(
+            equity=100000.0, last_equity=100000.0, cash=100000.0, buying_power=200000.0,
+            intraday_drawdown_pct=0.0, kill_switch_active=False,
+        )
+        self.signal = TradingSignal(
+            symbol="AAPL", signal_type=SignalType.BUY, timestamp=datetime.utcnow(),
+            close_price=200.0, entry_price=200.0, ema_20=195.0, ema_50=190.0, ema_200=180.0,
+            rsi_14=43.0, atr_14=4.0, prev_high=199.0, reason="Valid setup",
+        )
+        rng = np.random.default_rng(42)
+        idx = pd.date_range("2026-01-01", periods=80, freq="B")
+        self.qqq = pd.Series(rng.normal(0, 0.01, 80), index=idx)
+        self.aapl_correlated = self.qqq * 1.2 + pd.Series(rng.normal(0, 0.002, 80), index=idx)
+        self.xle_uncorrelated = pd.Series(rng.normal(0, 0.01, 80), index=idx)
+
+    def test_high_correlation_rejected(self):
+        pos = self.rm.calculate_position_size(
+            self.signal, self.account,
+            candidate_returns=self.aapl_correlated, open_positions_returns={"QQQ": self.qqq},
+        )
+        self.assertFalse(pos.is_valid)
+        self.assertEqual(pos.shares, 0.0)
+        self.assertIn("Correlation gate blocked: Exceeded correlation limit with QQQ", pos.rejection_reason)
+
+    def test_low_correlation_approved(self):
+        ok, reason, max_corr = self.rm.check_portfolio_correlation(
+            "XLE", self.xle_uncorrelated, {"QQQ": self.qqq}
+        )
+        self.assertTrue(ok)
+        self.assertIsNone(reason)
+        self.assertLess(max_corr, 0.50)
+        pos = self.rm.calculate_position_size(
+            self.signal, self.account,
+            candidate_returns=self.xle_uncorrelated, open_positions_returns={"QQQ": self.qqq},
+        )
+        self.assertTrue(pos.is_valid)
+        self.assertGreater(pos.shares, 0.0)
+
+    def test_empty_portfolio_and_dirty_data(self):
+        # Empty portfolio -> approved
+        self.assertEqual(self.rm.check_portfolio_correlation("AAPL", self.qqq, {}), (True, None, 0.0))
+        # Misaligned lengths + NaNs still detect the correlation on the overlapping bars
+        dirty = self.aapl_correlated.iloc[10:].copy()
+        dirty.iloc[::7] = np.nan
+        ok, _, max_corr = self.rm.check_portfolio_correlation("AAPL", dirty, {"QQQ": self.qqq})
+        self.assertFalse(ok)
+        self.assertGreater(max_corr, 0.75)
+        # Zero-volatility, all-NaN and too-short series are skipped without crashing
+        flat = pd.Series(0.0, index=self.qqq.index)
+        all_nan = pd.Series(np.nan, index=self.qqq.index)
+        ok, reason, max_corr = self.rm.check_portfolio_correlation(
+            "AAPL", self.qqq, {"FLAT": flat, "NAN": all_nan, "SHORT": self.qqq.iloc[:2]}
+        )
+        self.assertEqual((ok, reason, max_corr), (True, None, 0.0))
+        # Backward compat: no correlation data -> gate not applied
+        self.assertTrue(self.rm.calculate_position_size(self.signal, self.account).is_valid)
 
 
 if __name__ == "__main__":

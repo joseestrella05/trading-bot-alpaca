@@ -12,7 +12,9 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models import SignalType
 from news_filter import NewsFilter, NewsFilterResult
-from ml_model import StockMLPredictor, MLPredictionResult
+import tempfile
+
+from ml_model import StockMLPredictor, MLPredictionResult, create_labeled_dataset
 from strategy import SwingTrendFollowingStrategy
 
 
@@ -113,6 +115,88 @@ class TestNewsAndML(unittest.TestCase):
         # Must be HOLD
         self.assertEqual(signal.signal_type, SignalType.HOLD)
         self.assertFalse(signal.news_safe)
+
+
+def _barrier_path(future_highs, future_lows, future_closes):
+    """25 flat warm-up bars + entry bar at 100 (ATR=1 -> TP=102, SL=98.5) + the given future bars."""
+    n = 26
+    df = pd.DataFrame({
+        "open": [100.0] * n + list(future_closes),
+        "high": [100.5] * n + list(future_highs),
+        "low": [99.5] * n + list(future_lows),
+        "close": [100.0] * n + list(future_closes),
+        "volume": 1e6,
+        "ema_fast": 100.0, "ema_medium": 100.0, "rsi": 50.0, "atr": 1.0,
+    }, index=pd.date_range("2025-01-01", periods=n + len(future_closes), freq="D"))
+    labeled = create_labeled_dataset(df, holding_period=len(future_closes), profit_take_atr=2.0, stop_loss_atr=1.5)
+    assert labeled.index[-1] == df.index[n - 1]  # entry bar is the last one with a complete window
+    return int(labeled["target"].iloc[-1])
+
+
+class TestLightGBMPipeline(unittest.TestCase):
+    def test_triple_barrier_labels(self):
+        # Take profit (102) touched on bar 3, stop (98.5) never -> 1
+        self.assertEqual(_barrier_path([101, 101.5, 102.2, 101, 101], [99.5, 99.6, 100, 100, 100], [100.5, 101, 102, 100.5, 100.5]), 1)
+        # Stop touched on bar 2 before take profit on bar 4 -> 0
+        self.assertEqual(_barrier_path([100.5, 100.5, 101, 103, 101], [99.5, 98.4, 99, 100, 100], [100, 99, 100, 102, 100]), 0)
+        # Both barriers inside the same bar -> conservative 0
+        self.assertEqual(_barrier_path([102.5, 101, 101, 101, 101], [98.0, 100, 100, 100, 100], [100, 100, 100, 100, 100]), 0)
+        # No barrier touched, time expiry in loss -> 0; in profit -> 1
+        self.assertEqual(_barrier_path([100.5] * 5, [99.0] * 5, [100, 100, 99.8, 99.6, 99.5]), 0)
+        self.assertEqual(_barrier_path([101.5] * 5, [99.5] * 5, [100.5, 101, 101, 101.2, 101.4]), 1)
+
+    def test_features_have_no_lookahead(self):
+        rng = np.random.default_rng(0)
+        close = 100 * np.exp(np.cumsum(rng.normal(0, 0.01, 80)))
+        df = pd.DataFrame({"close": close, "volume": rng.uniform(1e6, 2e6, 80),
+                           "ema_fast": close, "ema_medium": close, "rsi": 50.0, "atr": 1.0},
+                          index=pd.date_range("2025-01-01", periods=80, freq="D"))
+        full = StockMLPredictor(model_path="/nonexistent").compute_features(df)
+        truncated = StockMLPredictor(model_path="/nonexistent").compute_features(df.iloc[:50])
+        # Features at bar 49 must not change when future bars are appended
+        pd.testing.assert_series_equal(full.iloc[49][list(truncated.columns)], truncated.iloc[49], check_names=False)
+
+    def test_fallback_when_model_missing_or_corrupt(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            missing = StockMLPredictor(model_path=os.path.join(tmp, "nope.joblib"))
+            corrupt_path = os.path.join(tmp, "corrupt.joblib")
+            with open(corrupt_path, "wb") as fh:
+                fh.write(b"not a model")
+            corrupt = StockMLPredictor(model_path=corrupt_path)
+            for predictor in (missing, corrupt):
+                res = predictor.predict("AAPL", pd.DataFrame())
+                self.assertEqual(res.probability, 0.50)
+                self.assertTrue(res.is_approved)
+                self.assertEqual(res.reason, "ML Model unavailable (fallback safe)")
+
+    def test_train_and_predict_with_lightgbm(self):
+        try:
+            import lightgbm  # noqa: F401
+        except (ImportError, OSError) as exc:  # OSError: missing libomp on macOS
+            self.skipTest(f"lightgbm unavailable: {exc}")
+        rng = np.random.default_rng(7)
+        strat = SwingTrendFollowingStrategy()
+        data = {}
+        for sym in ("AAA", "BBB", "CCC"):
+            close = 100 * np.exp(np.cumsum(rng.normal(0.0005, 0.015, 300)))
+            df = pd.DataFrame({
+                "open": close, "high": close * 1.01, "low": close * 0.99, "close": close,
+                "volume": rng.uniform(1e6, 3e6, 300),
+            }, index=pd.date_range("2024-01-01", periods=300, freq="B"))
+            data[sym] = strat.calculate_indicators(df)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "stock_lgbm_model.joblib")
+            StockMLPredictor(model_path=path).train_model(data, n_splits=5)
+            self.assertTrue(os.path.exists(path))
+            res = StockMLPredictor(model_path=path).predict("AAA", data["AAA"])  # reload from disk
+
+        self.assertIsInstance(res, MLPredictionResult)
+        self.assertIsInstance(res.probability, float)
+        self.assertGreaterEqual(res.probability, 0.0)
+        self.assertLessEqual(res.probability, 1.0)
+        self.assertEqual(res.is_approved, res.probability >= 0.60)
+        self.assertRegex(res.reason, r"ML (Confirmed|Rejected) \(\d+%\)")
 
 
 if __name__ == "__main__":

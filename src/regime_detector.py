@@ -1,10 +1,12 @@
 """Market Regime Detection Engine (Regime-Switching Architecture).
 
 Evaluates macro market structure (SPY benchmark) and individual equities/ETFs
-in a daily (1D) timeframe to classify market condition into three distinct states:
-1. BULL_TREND: Clear bullish trend (Price > EMA20 > EMA50, ATR Percentile <= 70%).
-2. RANGE_CHOP: Range-bound / consolidation (lateral slopes or oscillating price, medium volatility).
-3. HIGH_VOLATILITY_DEFENSIVE: Panic / high volatility / trend breakdown (Price < EMA200 or ATR Percentile >= 85%).
+in a daily (1D) timeframe and assigns a continuous risk multiplier (0.0 - 1.25) applied
+to the base risk per trade:
+1. HALT (0.00): ATR(14) percentile over 100 bars > 88 or severe 5-bar drawdown -> no new entries.
+2. DEFENSIVE ACTIVE (0.40): ATR percentile in (70, 88] or price < EMA200 -> small size only.
+3. BULL_TREND (1.25): ADX >= 25, EMA20 > EMA50 > EMA200 with rising EMA50.
+4. RANGE_CHOP (0.75): everything else (normal volatility, no clear trend).
 """
 
 from __future__ import annotations
@@ -40,6 +42,7 @@ class RegimeAnalysis:
     risk_reward_ratio: float
     allow_entries: bool
     description: str
+    risk_multiplier: float = 1.0
 
 
 class MarketRegimeDetector:
@@ -48,22 +51,34 @@ class MarketRegimeDetector:
     def __init__(
         self,
         volatility_lookback: int = 100,
-        defensive_atr_percentile: float = 85.0,
+        defensive_atr_percentile: float = 88.0,
         bull_atr_percentile: float = 70.0,
         slope_bars: int = 5,
+        bull_adx_threshold: float = 25.0,
+        panic_drawdown_pct: float = 0.06,
+        panic_lookback_bars: int = 5,
+        base_risk_pct: float = 0.01,
     ) -> None:
         """Initialize regime detector parameters.
 
         Args:
             volatility_lookback: Historical window size (bars) for ATR percentile ranking (default: 100).
-            defensive_atr_percentile: Threshold for defensive mode triggering (default: 85.0%).
-            bull_atr_percentile: Maximum volatility percentile allowed for bull trend (default: 70.0%).
+            defensive_atr_percentile: ATR percentile above which entries halt (default: 88.0%).
+            bull_atr_percentile: ATR percentile above which sizing drops to defensive 0.40 (default: 70.0%).
             slope_bars: Number of bars over which EMA slope is evaluated (default: 5).
+            bull_adx_threshold: Minimum ADX(14) for a clear bull trend (default: 25).
+            panic_drawdown_pct: Drawdown from the highest close of the last N bars that halts entries (6%).
+            panic_lookback_bars: N bars for the panic drawdown check (default: 5).
+            base_risk_pct: Base risk per trade the multiplier scales; only used for display text.
         """
         self.volatility_lookback = volatility_lookback
         self.defensive_atr_percentile = defensive_atr_percentile
         self.bull_atr_percentile = bull_atr_percentile
         self.slope_bars = slope_bars
+        self.bull_adx_threshold = bull_adx_threshold
+        self.panic_drawdown_pct = panic_drawdown_pct
+        self.panic_lookback_bars = panic_lookback_bars
+        self.base_risk_pct = base_risk_pct
 
     def calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Compute EMA(20, 50, 200), ATR(14), and Wilder's ADX(14).
@@ -161,158 +176,108 @@ class MarketRegimeDetector:
         return slope_20, slope_50
 
     def analyze(self, df: pd.DataFrame, symbol: str = "SPY") -> RegimeAnalysis:
-        """Analyze market data for symbol/benchmark and classify into unique regime.
+        """Classify the regime and assign a continuous risk multiplier (first match wins).
 
-        Classification Logic:
-        1. HIGH_VOLATILITY_DEFENSIVE (Priority 1):
-           - Price < EMA200 OR ATR Percentile >= 85.0%
-           -> Risk = 0.0%, R:R = 0:1, allow_entries = False
-        2. BULL_TREND (Priority 2):
-           - Price > EMA20 > EMA50 AND ATR Percentile <= 70.0%
-           -> Risk = 1.25%, R:R = 3:1, allow_entries = True
-        3. RANGE_CHOP (Priority 3):
-           - Lateral slopes or Price oscillating between EMA20/EMA50 with medium volatility
-           -> Risk = 0.50%, R:R = 1.5:1, allow_entries = True
+        1. HALT (0.00): ATR percentile > defensive_atr_percentile (88) OR drawdown from the
+           highest close of the last panic_lookback_bars >= panic_drawdown_pct.
+        2. DEFENSIVE ACTIVE (0.40): ATR percentile > bull_atr_percentile (70) OR price < EMA200.
+        3. BULL_TREND (1.25): ADX >= 25 AND EMA20 > EMA50 > EMA200 AND EMA50 slope > 0.
+        4. RANGE_CHOP (0.75): otherwise.
 
         Args:
             df: Historical daily OHLCV DataFrame.
             symbol: Ticker identifier (e.g. 'SPY').
 
         Returns:
-            RegimeAnalysis: Comprehensive diagnosis of regime state and adaptive parameters.
+            RegimeAnalysis: Regime state, risk multiplier and adaptive parameters.
         """
         if df is None or len(df) < 15:
-            return RegimeAnalysis(
-                regime=MarketRegime.RANGE_CHOP,
-                symbol=symbol,
-                price=0.0,
-                ema_20=0.0,
-                ema_50=0.0,
-                ema_200=0.0,
-                ema20_slope=0.0,
-                ema50_slope=0.0,
-                atr_14=0.0,
-                atr_percentile=50.0,
-                adx_14=0.0,
-                mode_text="CONSERVADOR (0.5%)",
-                display_badge="RANGE [CONSERVADOR (0.5%)]",
-                risk_per_trade_pct=0.0050,
-                risk_reward_ratio=1.5,
-                allow_entries=True,
-                description="Insufficient history for full regime classification. Defaulting to RANGE_CHOP.",
+            return self._build(
+                MarketRegime.RANGE_CHOP, 0.75, symbol,
+                "Insufficient history for full regime classification. Defaulting to RANGE_CHOP.",
+                price=0.0, ema_20=0.0, ema_50=0.0, ema_200=0.0, ema20_slope=0.0, ema50_slope=0.0,
+                atr_14=0.0, atr_percentile=50.0, adx_14=0.0,
             )
 
         ind_df = self.calculate_indicators(df)
         curr = ind_df.iloc[-1]
-
         price = float(curr["close"])
         ema_20 = float(curr["ema_20"])
         ema_50 = float(curr["ema_50"])
         ema_200 = float(curr["ema_200"])
-        atr_14 = float(curr["atr_14"])
         adx_14 = float(curr["adx_14"])
-
         atr_percentile = self.compute_atr_percentile(ind_df["atr_14"])
         ema20_slope, ema50_slope = self.compute_slopes(ind_df["ema_20"], ind_df["ema_50"])
+        recent_high = float(ind_df["close"].iloc[-(self.panic_lookback_bars + 1):].max())
+        drawdown = 1.0 - price / recent_high if recent_high > 0 else 0.0
 
-        # -------------------------------------------------------------
-        # Condition 1: HIGH_VOLATILITY_DEFENSIVE (Panic / Trend Broken)
-        # Price < EMA200 OR ATR Percentile >= 85.0%
-        # -------------------------------------------------------------
-        is_below_ema200 = price < ema_200
-        is_extreme_volatility = atr_percentile >= self.defensive_atr_percentile
-
-        if is_below_ema200 or is_extreme_volatility:
-            reasons = []
-            if is_below_ema200:
-                reasons.append(f"Price (${price:.2f}) < EMA200 (${ema_200:.2f})")
-            if is_extreme_volatility:
-                reasons.append(f"ATR Volatility Percentile ({atr_percentile:.1f}%) >= {self.defensive_atr_percentile:.1f}%")
-
-            desc = f"DEFENSIVE MODE: {'; '.join(reasons)}. New entries halted for capital protection."
-            return RegimeAnalysis(
-                regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE,
-                symbol=symbol,
-                price=price,
-                ema_20=ema_20,
-                ema_50=ema_50,
-                ema_200=ema_200,
-                ema20_slope=ema20_slope,
-                ema50_slope=ema50_slope,
-                atr_14=atr_14,
-                atr_percentile=atr_percentile,
-                adx_14=adx_14,
-                mode_text="DEFENSIVE [OFF]",
-                display_badge="DEFENSIVE [OFF]",
-                risk_per_trade_pct=0.0,
-                risk_reward_ratio=0.0,
-                allow_entries=False,
-                description=desc,
-            )
-
-        # -------------------------------------------------------------
-        # Condition 2: BULL_TREND (Clear Bullish Trend)
-        # Price > EMA20 > EMA50 AND ATR Percentile <= 70.0%
-        # -------------------------------------------------------------
-        is_bull_stacked = (price > ema_20) and (ema_20 > ema_50)
-        is_volatility_controlled = atr_percentile <= self.bull_atr_percentile
-
-        if is_bull_stacked and is_volatility_controlled:
-            desc = (
-                f"BULL TREND CONFIRMED: Price (${price:.2f}) > EMA20 (${ema_20:.2f}) > EMA50 (${ema_50:.2f}), "
-                f"ATR Volatility Percentile at {atr_percentile:.1f}% (<= {self.bull_atr_percentile:.1f}%), "
-                f"ADX={adx_14:.1f}. Aggressive position sizing unlocked."
-            )
-            return RegimeAnalysis(
-                regime=MarketRegime.BULL_TREND,
-                symbol=symbol,
-                price=price,
-                ema_20=ema_20,
-                ema_50=ema_50,
-                ema_200=ema_200,
-                ema20_slope=ema20_slope,
-                ema50_slope=ema50_slope,
-                atr_14=atr_14,
-                atr_percentile=atr_percentile,
-                adx_14=adx_14,
-                mode_text="AGRESIVO (1.25%)",
-                display_badge="BULL TREND [AGRESIVO (1.25%)]",
-                risk_per_trade_pct=0.0125,
-                risk_reward_ratio=3.0,
-                allow_entries=True,
-                description=desc,
-            )
-
-        # -------------------------------------------------------------
-        # Condition 3: RANGE_CHOP (Consolidation / Lateral Movement)
-        # Price oscillating between EMAs or lateral slope with medium volatility
-        # -------------------------------------------------------------
-        reasons = []
-        if not is_bull_stacked:
-            reasons.append("EMAs not in bull sequence (Price oscillating or consolidating)")
-        if not is_volatility_controlled:
-            reasons.append(f"Elevated ATR Volatility ({atr_percentile:.1f}% > {self.bull_atr_percentile:.1f}%)")
-
-        desc = (
-            f"RANGE / CHOP MARKET: {'; '.join(reasons)}. "
-            f"Conservative position sizing active."
+        metrics = dict(
+            price=price, ema_20=ema_20, ema_50=ema_50, ema_200=ema_200,
+            ema20_slope=ema20_slope, ema50_slope=ema50_slope,
+            atr_14=float(curr["atr_14"]), atr_percentile=atr_percentile, adx_14=adx_14,
         )
+
+        halt_reasons = []
+        if atr_percentile > self.defensive_atr_percentile:
+            halt_reasons.append(f"ATR percentile {atr_percentile:.1f}% > {self.defensive_atr_percentile:.1f}%")
+        if drawdown >= self.panic_drawdown_pct:
+            halt_reasons.append(
+                f"{self.panic_lookback_bars}-bar drawdown {drawdown*100:.1f}% >= {self.panic_drawdown_pct*100:.1f}%"
+            )
+        if halt_reasons:
+            return self._build(
+                MarketRegime.HIGH_VOLATILITY_DEFENSIVE, 0.0, symbol,
+                f"REGIME HALT: {'; '.join(halt_reasons)}. New entries blocked.", **metrics,
+            )
+
+        defensive_reasons = []
+        if atr_percentile > self.bull_atr_percentile:
+            defensive_reasons.append(f"Elevated ATR percentile {atr_percentile:.1f}% > {self.bull_atr_percentile:.1f}%")
+        if price < ema_200:
+            defensive_reasons.append(f"Price (${price:.2f}) < EMA200 (${ema_200:.2f})")
+        if defensive_reasons:
+            return self._build(
+                MarketRegime.HIGH_VOLATILITY_DEFENSIVE, 0.40, symbol,
+                f"DEFENSIVE ACTIVE: {'; '.join(defensive_reasons)}. Reduced size for high-quality setups only.",
+                **metrics,
+            )
+
+        if adx_14 >= self.bull_adx_threshold and ema_20 > ema_50 > ema_200 and ema50_slope > 0:
+            return self._build(
+                MarketRegime.BULL_TREND, 1.25, symbol,
+                f"BULL TREND CONFIRMED: EMA20 (${ema_20:.2f}) > EMA50 (${ema_50:.2f}) > EMA200 (${ema_200:.2f}), "
+                f"ADX={adx_14:.1f}, ATR percentile {atr_percentile:.1f}%. Aggressive sizing unlocked.",
+                **metrics,
+            )
+
+        return self._build(
+            MarketRegime.RANGE_CHOP, 0.75, symbol,
+            f"RANGE / CHOP: no clear trend (ADX={adx_14:.1f}, EMA sequence not bullish or EMA50 flat), "
+            f"ATR percentile {atr_percentile:.1f}%. Moderate sizing.",
+            **metrics,
+        )
+
+    def _build(
+        self, regime: MarketRegime, multiplier: float, symbol: str, description: str, **metrics: float
+    ) -> RegimeAnalysis:
+        """Assemble RegimeAnalysis with mode labels derived from the multiplier."""
+        risk_pct = self.base_risk_pct * multiplier
+        label, mode, rr = {
+            MarketRegime.BULL_TREND: ("BULL TREND", "AGRESIVO", 3.0),
+            MarketRegime.RANGE_CHOP: ("RANGE", "MODERADO", 1.5),
+            MarketRegime.HIGH_VOLATILITY_DEFENSIVE: ("DEFENSIVE", "DEFENSIVO ACTIVO", 2.0),
+        }[regime]
+        if multiplier <= 0.0:
+            label, mode, rr = "HALT", "HALT", 0.0
         return RegimeAnalysis(
-            regime=MarketRegime.RANGE_CHOP,
+            regime=regime,
             symbol=symbol,
-            price=price,
-            ema_20=ema_20,
-            ema_50=ema_50,
-            ema_200=ema_200,
-            ema20_slope=ema20_slope,
-            ema50_slope=ema50_slope,
-            atr_14=atr_14,
-            atr_percentile=atr_percentile,
-            adx_14=adx_14,
-            mode_text="CONSERVADOR (0.5%)",
-            display_badge="RANGE [CONSERVADOR (0.5%)]",
-            risk_per_trade_pct=0.0050,
-            risk_reward_ratio=1.5,
-            allow_entries=True,
-            description=desc,
+            mode_text=f"{mode} ({risk_pct*100:.2f}%)",
+            display_badge=f"{label} [{risk_pct*100:.2f}%]",
+            risk_per_trade_pct=risk_pct,
+            risk_reward_ratio=rr,
+            allow_entries=multiplier > 0.0,
+            description=description,
+            risk_multiplier=multiplier,
+            **metrics,
         )

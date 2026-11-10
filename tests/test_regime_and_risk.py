@@ -1,5 +1,6 @@
 """Unit tests for Market Regime Detection and Adaptive Risk Management Engine."""
 
+from dataclasses import replace
 from datetime import datetime, timezone
 import math
 import unittest
@@ -17,7 +18,7 @@ class TestMarketRegimeDetector(unittest.TestCase):
     def setUp(self):
         self.detector = MarketRegimeDetector(
             volatility_lookback=100,
-            defensive_atr_percentile=85.0,
+            defensive_atr_percentile=88.0,
             bull_atr_percentile=70.0,
             slope_bars=5,
         )
@@ -53,43 +54,70 @@ class TestMarketRegimeDetector(unittest.TestCase):
         analysis = self.detector.analyze(df, symbol="BULL_TEST")
 
         self.assertEqual(analysis.regime, MarketRegime.BULL_TREND)
+        self.assertEqual(analysis.risk_multiplier, 1.25)
         self.assertEqual(analysis.risk_per_trade_pct, 0.0125)
         self.assertEqual(analysis.risk_reward_ratio, 3.0)
         self.assertTrue(analysis.allow_entries)
         self.assertIn("AGRESIVO", analysis.mode_text)
+        self.assertEqual(analysis.display_badge, "BULL TREND [1.25%]")
 
-    def test_defensive_mode_via_price_below_ema200(self):
-        # Generate downtrend data where price is below EMA200
+    def test_defensive_active_via_price_below_ema200(self):
+        # Trend broken (price < EMA200) with normal volatility -> reduced size, not a block
         df = self._generate_synthetic_bars(n_bars=220, trend="bear", noise=0.5)
         analysis = self.detector.analyze(df, symbol="BEAR_TEST")
 
         self.assertEqual(analysis.regime, MarketRegime.HIGH_VOLATILITY_DEFENSIVE)
-        self.assertEqual(analysis.risk_per_trade_pct, 0.0)
-        self.assertFalse(analysis.allow_entries)
-        self.assertIn("DEFENSIVE", analysis.mode_text)
+        self.assertEqual(analysis.risk_multiplier, 0.40)
+        self.assertAlmostEqual(analysis.risk_per_trade_pct, 0.0040)
+        self.assertTrue(analysis.allow_entries)
+        self.assertEqual(analysis.display_badge, "DEFENSIVE [0.40%]")
 
-    def test_defensive_mode_via_high_volatility(self):
+    def test_halt_via_extreme_volatility(self):
         # Generate bull trend bars but spike volatility in recent bars
         df = self._generate_synthetic_bars(n_bars=220, trend="bull", noise=0.1)
-        # Inject extreme wide range bars at the end to shoot ATR above 85th percentile
+        # Inject extreme wide range bars at the end to shoot ATR above the 88th percentile
         for idx in range(-5, 0):
             df.iloc[idx, df.columns.get_loc("high")] += 25.0
             df.iloc[idx, df.columns.get_loc("low")] -= 25.0
 
         analysis = self.detector.analyze(df, symbol="VOL_SPIKE")
         self.assertEqual(analysis.regime, MarketRegime.HIGH_VOLATILITY_DEFENSIVE)
+        self.assertEqual(analysis.risk_multiplier, 0.0)
         self.assertFalse(analysis.allow_entries)
-        self.assertGreaterEqual(analysis.atr_percentile, 85.0)
+        self.assertGreater(analysis.atr_percentile, 88.0)
+
+    def _with_atr_percentile(self, pct: float):
+        df = self._generate_synthetic_bars(n_bars=220, trend="bull", noise=0.2)
+        self.detector.compute_atr_percentile = lambda _atr: pct
+        return self.detector.analyze(df, symbol="PCT")
+
+    def test_multiplier_bands_by_atr_percentile(self):
+        # Same bullish structure; only the volatility percentile changes the multiplier
+        self.assertEqual(self._with_atr_percentile(60.0).risk_multiplier, 1.25)
+        self.assertEqual(self._with_atr_percentile(70.0).risk_multiplier, 1.25)
+        self.assertEqual(self._with_atr_percentile(75.0).risk_multiplier, 0.40)
+        self.assertEqual(self._with_atr_percentile(88.0).risk_multiplier, 0.40)
+        self.assertEqual(self._with_atr_percentile(88.5).risk_multiplier, 0.0)
+
+    def test_halt_via_five_bar_drawdown(self):
+        df = self._generate_synthetic_bars(n_bars=220, trend="bull", noise=0.2)
+        df.iloc[-1, df.columns.get_loc("close")] *= 0.92  # -8% from the 5-bar high
+        detector = MarketRegimeDetector(volatility_lookback=100)
+        detector.compute_atr_percentile = lambda _atr: 50.0  # isolate the drawdown rule
+        analysis = detector.analyze(df, symbol="CRASH")
+        self.assertEqual(analysis.risk_multiplier, 0.0)
+        self.assertIn("drawdown", analysis.description)
 
     def test_range_chop_classification(self):
         df = self._generate_synthetic_bars(n_bars=220, trend="range", noise=0.3)
         analysis = self.detector.analyze(df, symbol="CHOP_TEST")
 
         self.assertEqual(analysis.regime, MarketRegime.RANGE_CHOP)
-        self.assertEqual(analysis.risk_per_trade_pct, 0.0050)
+        self.assertEqual(analysis.risk_multiplier, 0.75)
+        self.assertAlmostEqual(analysis.risk_per_trade_pct, 0.0075)
         self.assertEqual(analysis.risk_reward_ratio, 1.5)
         self.assertTrue(analysis.allow_entries)
-        self.assertIn("CONSERVADOR", analysis.mode_text)
+        self.assertIn("MODERADO", analysis.mode_text)
 
 
 class TestAdaptiveRiskEngine(unittest.TestCase):
@@ -147,11 +175,11 @@ class TestAdaptiveRiskEngine(unittest.TestCase):
         self.assertEqual(pos_size.shares, 416.0)
         self.assertAlmostEqual(pos_size.risk_pct_used, 0.0125, places=4)
 
-    def test_range_chop_conservative_sizing(self):
-        # Equity = $100,000 -> 0.50% risk = $500
+    def test_range_chop_moderate_sizing(self):
+        # Equity = $100,000 -> 1.0% base * 0.75 = 0.75% risk = $750
         # Entry = $100.00, ATR = $2.00 -> SL distance = $3.00, Stop Loss = $97.00
         # R:R = 1.5:1 -> Take Profit = $100.00 + (1.5 * $3.00) = $104.50
-        # Shares = $500 / $3.00 = 166.666... -> floored to 166
+        # Shares = $750 / $3.00 = 250
         account = AccountState(
             equity=100000.0,
             last_equity=100000.0,
@@ -170,10 +198,35 @@ class TestAdaptiveRiskEngine(unittest.TestCase):
         self.assertEqual(pos_size.stop_loss_price, 97.00)
         self.assertEqual(pos_size.take_profit_price, 104.50)
         self.assertEqual(pos_size.risk_reward_ratio, 1.5)
-        self.assertEqual(pos_size.shares, 166.0)
-        self.assertAlmostEqual(pos_size.risk_pct_used, 0.0050, places=4)
+        self.assertEqual(pos_size.shares, 250.0)
+        self.assertAlmostEqual(pos_size.risk_pct_used, 0.0075, places=4)
 
-    def test_defensive_mode_total_block(self):
+    def test_defensive_active_small_size(self):
+        # Defensive multiplier 0.40 -> 0.40% risk = $400 / $3.00 = 133.3 -> 133 shares (not blocked)
+        account = AccountState(
+            equity=100000.0, last_equity=100000.0, cash=80000.0, buying_power=300000.0,
+            intraday_drawdown_pct=0.0, kill_switch_active=False,
+        )
+        signal = replace(self._sample_signal(entry=100.0, atr=2.0), risk_multiplier=0.40)
+        pos_size = self.engine.calculate_position_size(
+            signal, account, regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE
+        )
+        self.assertTrue(pos_size.is_valid)
+        self.assertEqual(pos_size.shares, 133.0)
+        self.assertAlmostEqual(pos_size.risk_pct_used, 0.0040, places=4)
+        self.assertEqual(pos_size.take_profit_price, 106.00)  # 2:1 in defensive mode
+
+    def test_signal_multiplier_overrides_regime_default(self):
+        # Continuous scaling: multiplier 0.60 on a BULL_TREND regime -> 0.60% risk = $600 / $3 = 200
+        account = AccountState(
+            equity=100000.0, last_equity=100000.0, cash=80000.0, buying_power=300000.0,
+            intraday_drawdown_pct=0.0, kill_switch_active=False,
+        )
+        signal = replace(self._sample_signal(entry=100.0, atr=2.0), risk_multiplier=0.60)
+        pos_size = self.engine.calculate_position_size(signal, account, regime=MarketRegime.BULL_TREND)
+        self.assertEqual(pos_size.shares, 200.0)
+
+    def test_regime_absolute_halt(self):
         account = AccountState(
             equity=100000.0,
             last_equity=100000.0,
@@ -182,7 +235,7 @@ class TestAdaptiveRiskEngine(unittest.TestCase):
             intraday_drawdown_pct=0.0,
             kill_switch_active=False,
         )
-        signal = self._sample_signal(entry=100.0, atr=2.0)
+        signal = replace(self._sample_signal(entry=100.0, atr=2.0), risk_multiplier=0.0)
 
         pos_size = self.engine.calculate_position_size(
             signal, account, regime=MarketRegime.HIGH_VOLATILITY_DEFENSIVE
@@ -190,7 +243,7 @@ class TestAdaptiveRiskEngine(unittest.TestCase):
 
         self.assertFalse(pos_size.is_valid)
         self.assertEqual(pos_size.shares, 0.0)
-        self.assertIn("HIGH_VOLATILITY_DEFENSIVE", pos_size.rejection_reason)
+        self.assertEqual(pos_size.rejection_reason, "Regime absolute halt: Extreme market volatility")
 
     def test_intraday_circuit_breaker_guardrail(self):
         # Drawdown = 2.6% (>= 2.5% max guardrail) -> must block
@@ -211,6 +264,37 @@ class TestAdaptiveRiskEngine(unittest.TestCase):
         self.assertFalse(pos_size.is_valid)
         self.assertEqual(pos_size.shares, 0.0)
         self.assertIn("Circuit breaker", pos_size.rejection_reason)
+
+
+class TestStrategyRegimeModulation(unittest.TestCase):
+    """Strategy propagates the most conservative multiplier and only blocks on an absolute halt."""
+
+    def setUp(self):
+        self.df = TestMarketRegimeDetector()._generate_synthetic_bars(n_bars=220, trend="bull", noise=0.2)
+        self.strategy = SwingTrendFollowingStrategy(StrategyConfig())
+
+    def _macro(self, multiplier: float, regime: MarketRegime) -> RegimeAnalysis:
+        return MarketRegimeDetector()._build(
+            regime, multiplier, "SPY", "synthetic macro",
+            price=1.0, ema_20=1.0, ema_50=1.0, ema_200=1.0, ema20_slope=0.0, ema50_slope=0.0,
+            atr_14=1.0, atr_percentile=50.0, adx_14=20.0,
+        )
+
+    def test_macro_halt_forces_hold(self):
+        signal = self.strategy.evaluate(
+            "TEST", self.df, macro_regime=self._macro(0.0, MarketRegime.HIGH_VOLATILITY_DEFENSIVE)
+        )
+        self.assertEqual(signal.signal_type, SignalType.HOLD)
+        self.assertIn("Regime absolute halt", signal.reason)
+        self.assertEqual(signal.risk_multiplier, 0.0)
+
+    def test_macro_defensive_no_longer_blocks(self):
+        signal = self.strategy.evaluate(
+            "TEST", self.df, macro_regime=self._macro(0.40, MarketRegime.HIGH_VOLATILITY_DEFENSIVE)
+        )
+        self.assertNotIn("Regime", signal.reason.split(":")[0])
+        self.assertEqual(signal.regime, MarketRegime.HIGH_VOLATILITY_DEFENSIVE.value)
+        self.assertEqual(signal.risk_multiplier, 0.40)  # min(macro 0.40, asset bull 1.25)
 
 
 if __name__ == "__main__":
