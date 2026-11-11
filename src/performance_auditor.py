@@ -200,7 +200,7 @@ class PerformanceAuditor:
         return trade_id
 
     # --------------------------------------------------------- alpaca sync
-    def sync_closed_trades_from_alpaca(self, trading_client: Any, days_back: int = 30) -> int:
+    def sync_closed_trades_from_alpaca(self, trading_client: Any, days_back: int = 120) -> int:
         """Reconcile closed long trades from Alpaca orders into trade_history. Idempotent (id = entry order id).
 
         Pairs each filled BUY entry with its exit:
@@ -229,11 +229,29 @@ class PerformanceAuditor:
         logger.info("Alpaca trade sync: %d closed orders scanned, %d trades recorded.", len(orders), len(trades))
         return len(trades)
 
-    def sync_if_stale(self, trading_client: Any, max_age_seconds: float = 3600.0) -> Optional[int]:
+    def sync_if_stale(self, trading_client: Any, max_age_seconds: float = 3600.0, days_back: int = 120) -> Optional[int]:
         """Run the Alpaca sync only if the last one is older than max_age_seconds (or never ran)."""
         if self.last_sync_at and (datetime.now(timezone.utc) - self.last_sync_at).total_seconds() < max_age_seconds:
             return None
-        return self.sync_closed_trades_from_alpaca(trading_client)
+        return self.sync_closed_trades_from_alpaca(trading_client, days_back=days_back)
+
+    def sync_equity_history_from_alpaca(self, trading_client: Any, period: str = "3M") -> int:
+        """Sync historical daily equity curve from Alpaca get_portfolio_history."""
+        try:
+            from alpaca.trading.requests import GetPortfolioHistoryRequest
+            history = trading_client.get_portfolio_history(GetPortfolioHistoryRequest(period=period, timeframe="1D"))
+            if not history or not getattr(history, "equity", None):
+                return 0
+            count = 0
+            for ts, eq in zip(history.timestamp, history.equity):
+                if eq and eq > 0:
+                    d = datetime.fromtimestamp(ts, timezone.utc).date()
+                    self.record_daily_equity(equity=float(eq), cash=float(eq), buying_power=float(eq) * 4, as_of=d)
+                    count += 1
+            return count
+        except Exception as exc:
+            logger.warning("Failed to sync equity history from Alpaca: %s", exc)
+            return 0
 
     @staticmethod
     def _reconcile_orders(orders: List[Any]) -> List[Dict[str, Any]]:
@@ -347,7 +365,17 @@ class PerformanceAuditor:
             "total_pnl": round(sum(pnls), 2),
             "total_trades": len(pnls),
             "equity_curve": [p for p in curve if p["date"] >= cutoff],
+            "recent_trades": self.get_recent_trades(50),
         }
+
+    def get_recent_trades(self, limit: int = 50) -> List[Dict[str, Any]]:
+        """Return recent closed trades ordered by exit_date descending."""
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(TRADE_COLUMNS)} FROM trade_history ORDER BY exit_date DESC, id DESC LIMIT ?",
+                (limit,),
+            ).fetchall()
+        return [dict(r) for r in rows]
 
     def export_trades_csv(self) -> str:
         """All closed trades as CSV text (header row included), oldest exit first."""

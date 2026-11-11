@@ -308,18 +308,20 @@ class SwingTradingBot:
         exec_result = self.execution_handler.submit_bracket_order(position_size)
         return signal, position_size, exec_result
 
-    def sync_trade_history(self, max_age_seconds: Optional[float] = None) -> None:
+    def sync_trade_history(self, max_age_seconds: Optional[float] = None, days_back: int = 120) -> None:
         """Reconcile closed Alpaca trades into the audit DB. Never raises (must not break a scan).
 
         Args:
             max_age_seconds: If set, skip when the last sync is more recent than this.
+            days_back: Number of days back to scan for closed orders.
         """
         try:
             client = self.execution_handler.trading_client
             if max_age_seconds is None:
-                self.auditor.sync_closed_trades_from_alpaca(client)
+                self.auditor.sync_closed_trades_from_alpaca(client, days_back=days_back)
             else:
-                self.auditor.sync_if_stale(client, max_age_seconds=max_age_seconds)
+                self.auditor.sync_if_stale(client, max_age_seconds=max_age_seconds, days_back=days_back)
+            self.auditor.sync_equity_history_from_alpaca(client)
         except Exception as exc:
             self.logger.error("Closed-trade sync with Alpaca failed: %s", exc, exc_info=True)
 

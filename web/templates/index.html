@@ -221,6 +221,42 @@
             </div>
         </section>
 
+        <!-- AUDITED CLOSED TRADES -->
+        <section class="glass overflow-hidden">
+            <div class="px-5 py-4 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
+                <div class="flex items-center gap-3">
+                    <h2 class="text-sm font-semibold tracking-wide text-slate-200">Historial de Operaciones Auditadas</h2>
+                    <span id="trades-count-badge" class="px-2 py-0.5 text-[11px] font-mono font-semibold rounded-full bg-emerald-500/10 text-emerald-300 border border-emerald-500/30">0 Trades</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <a href="/api/export/trades.csv" download class="glass-btn rounded-lg px-2.5 py-1 text-[11px] font-mono flex items-center gap-1.5 text-slate-300 hover:text-white">
+                        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                        <span>Descargar CSV</span>
+                    </a>
+                </div>
+            </div>
+            <div class="overflow-x-auto scroll-smooth-x max-h-96 overflow-y-auto">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-[#0d1424]/90 backdrop-blur border-b border-white/10">
+                        <tr class="text-[11px] uppercase tracking-wider text-slate-400">
+                            <th scope="col" class="py-2.5 px-4 text-left font-semibold">Ticker</th>
+                            <th scope="col" class="py-2.5 px-3 text-left font-semibold">Cierre</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Acciones</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Entrada</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">Salida</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold">Motivo</th>
+                            <th scope="col" class="py-2.5 px-3 text-center font-semibold">R-Multiple</th>
+                            <th scope="col" class="py-2.5 px-3 text-right font-semibold">P&amp;L %</th>
+                            <th scope="col" class="py-2.5 px-4 text-right font-semibold">P&amp;L Neto ($)</th>
+                        </tr>
+                    </thead>
+                    <tbody id="trades-table-body" class="divide-y divide-white/5">
+                        <tr><td colspan="9" class="py-8 text-center text-slate-400 text-xs font-mono">Cargando historial auditado...</td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </section>
+
         <!-- QUANT RADAR -->
         <section class="glass overflow-hidden">
             <div class="px-5 py-4 border-b border-white/10 flex flex-wrap items-center justify-between gap-2">
@@ -415,9 +451,43 @@
                 setText('metric-maxdd', fmtPct(perf.max_drawdown_pct, false),
                     'text-2xl font-bold font-mono ' + (perf.max_drawdown_pct > 0 ? 'text-red-400' : 'text-white'));
                 renderEquityChart(perf.equity_curve || []);
+                renderRecentTrades(perf.recent_trades || []);
             } catch (err) {
                 console.error('performance', err);
             }
+        }
+
+        function renderRecentTrades(trades) {
+            setText('trades-count-badge', `${trades.length} Trades`);
+            if (!trades || !trades.length) {
+                setHtml('trades-table-body', '<tr><td colspan="9" class="py-8 text-center text-slate-400 text-xs font-mono">Sin operaciones auditadas aún.</td></tr>');
+                return;
+            }
+            const html = trades.map(t => {
+                const pnl = t.pnl_dollars;
+                const pnlClassStr = pnl >= 0 ? 'text-emerald-400 font-bold' : 'text-red-400 font-bold';
+                const exitBadge = t.exit_reason === 'TAKE_PROFIT'
+                    ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">TAKE PROFIT</span>'
+                    : t.exit_reason === 'STOP_LOSS'
+                    ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-red-500/15 text-red-300 border border-red-500/30">STOP LOSS</span>'
+                    : `<span class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-white/5 text-slate-300 border border-white/10">${esc(t.exit_reason || 'MANUAL')}</span>`;
+                const rMult = isNum(t.r_multiple) ? `${t.r_multiple >= 0 ? '+' : ''}${Number(t.r_multiple).toFixed(2)}R` : '--';
+                const exitDate = t.exit_date ? t.exit_date.slice(0, 10) : '--';
+                return `
+                    <tr class="hover:bg-white/[0.02] transition">
+                        <td class="py-2.5 px-4 font-mono font-semibold text-white">${esc(t.symbol)}</td>
+                        <td class="py-2.5 px-3 font-mono text-slate-400 text-xs">${exitDate}</td>
+                        <td class="py-2.5 px-3 text-right font-mono text-slate-300">${fmtNum(t.shares, 0)}</td>
+                        <td class="py-2.5 px-3 text-right font-mono text-slate-300">${fmtUsd(t.entry_price)}</td>
+                        <td class="py-2.5 px-3 text-right font-mono text-slate-300">${fmtUsd(t.exit_price)}</td>
+                        <td class="py-2.5 px-3 text-center">${exitBadge}</td>
+                        <td class="py-2.5 px-3 text-center font-mono text-xs ${t.r_multiple >= 1 ? 'text-emerald-300 font-bold' : t.r_multiple < 0 ? 'text-red-300' : 'text-slate-300'}">${rMult}</td>
+                        <td class="py-2.5 px-3 text-right font-mono text-xs ${pnlClassStr}">${fmtPct(t.pnl_pct)}</td>
+                        <td class="py-2.5 px-4 text-right font-mono text-xs ${pnlClassStr}">${fmtUsd(pnl)}</td>
+                    </tr>
+                `;
+            }).join('');
+            setHtml('trades-table-body', html);
         }
 
         function renderEquityChart(curve) {
