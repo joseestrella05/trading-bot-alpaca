@@ -114,7 +114,7 @@ class TestPerformanceAuditor(unittest.TestCase):
 
     def test_export_csv(self):
         self.auditor.record_closed_trade("MSFT", "2026-10-01", "2026-10-03", 400.0, 412.0, 2, exit_reason="TP")
-        rows = list(csv.reader(io.StringIO(self.auditor.export_trades_csv())))
+        rows = list(csv.reader(io.StringIO(self.auditor.export_trades_csv(raw=True))))
         self.assertEqual(rows[0][:3], ["id", "symbol", "entry_date"])
         self.assertEqual(len(rows), 2)
         self.assertEqual(rows[1][1], "MSFT")

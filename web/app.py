@@ -149,7 +149,7 @@ app.add_middleware(
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def serve_dashboard(request: Request):
     """Render the primary Bloomberg/TradingView style dark dashboard."""
-    return templates.TemplateResponse(
+    response = templates.TemplateResponse(
         request=request,
         name="index.html",
         context={
@@ -158,6 +158,10 @@ async def serve_dashboard(request: Request):
             "symbols": app_config.symbols if app_config else [],
         },
     )
+    response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+    response.headers["Pragma"] = "no-cache"
+    response.headers["Expires"] = "0"
+    return response
 
 
 # ---------------------------------------------------------------------------

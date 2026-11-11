@@ -377,16 +377,62 @@ class PerformanceAuditor:
             ).fetchall()
         return [dict(r) for r in rows]
 
-    def export_trades_csv(self) -> str:
-        """All closed trades as CSV text (header row included), oldest exit first."""
+    def export_trades_csv(self, raw: bool = False) -> str:
+        """All closed trades as CSV text. When raw=False (default for API), formats clean institutional columns."""
         with self._connect() as conn:
             rows = conn.execute(
                 f"SELECT {', '.join(TRADE_COLUMNS)} FROM trade_history ORDER BY exit_date, id"
             ).fetchall()
         buf = io.StringIO()
         writer = csv.writer(buf)
-        writer.writerow(TRADE_COLUMNS)
-        writer.writerows(tuple(r) for r in rows)
+        if raw:
+            writer.writerow(TRADE_COLUMNS)
+            writer.writerows(tuple(r) for r in rows)
+            return buf.getvalue()
+
+        clean_headers = [
+            "Trade #", "Ticker", "Tipo", "Fecha Entrada", "Fecha Salida", "Dias",
+            "Precio Entrada", "Precio Salida", "Acciones", "PnL ($)", "PnL (%)", "Motivo", "R-Multiplo"
+        ]
+        writer.writerow(clean_headers)
+
+        def _clean_date_str(s: Any) -> str:
+            if not s:
+                return "--"
+            try:
+                dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+                return dt.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return str(s)[:16]
+
+        def _days_held(e1_s: Any, e2_s: Any) -> float:
+            try:
+                d1 = datetime.fromisoformat(str(e1_s).replace("Z", "+00:00"))
+                d2 = datetime.fromisoformat(str(e2_s).replace("Z", "+00:00"))
+                return round(max(0.0, (d2 - d1).total_seconds() / 86400.0), 1)
+            except Exception:
+                return 0.0
+
+        for idx, r in enumerate(rows, start=1):
+            pnl_dollars = float(r["pnl_dollars"])
+            pnl_pct = float(r["pnl_pct"])
+            r_mult = r["r_multiple"]
+            r_mult_str = f"{float(r_mult):+.2f} R" if r_mult is not None else "--"
+            writer.writerow([
+                idx,
+                r["symbol"],
+                r["side"].upper(),
+                _clean_date_str(r["entry_date"]),
+                _clean_date_str(r["exit_date"]),
+                _days_held(r["entry_date"], r["exit_date"]),
+                f"${float(r['entry_price']):.2f}",
+                f"${float(r['exit_price']):.2f}",
+                int(round(float(r["shares"]))),
+                f"${pnl_dollars:+.2f}",
+                f"{pnl_pct:+.2f}%",
+                r["exit_reason"] or "MANUAL",
+                r_mult_str,
+            ])
         return buf.getvalue()
 
     def export_trades_xlsx(self) -> bytes:
