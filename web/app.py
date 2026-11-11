@@ -298,7 +298,7 @@ async def get_performance():
     return await asyncio.to_thread(bot_instance.auditor.get_performance_summary)
 
 
-@app.get("/api/export/trades.csv")
+@app.api_route("/api/export/trades.csv", methods=["GET", "HEAD"])
 async def export_trades_csv():
     """Download the audited closed-trade history as CSV."""
     if not bot_instance:
@@ -312,7 +312,7 @@ async def export_trades_csv():
     )
 
 
-@app.get("/api/export/trades.xlsx")
+@app.api_route("/api/export/trades.xlsx", methods=["GET", "HEAD"])
 async def export_trades_xlsx():
     """Download the audited closed-trade history as professional styled Excel workbook."""
     if not bot_instance:
