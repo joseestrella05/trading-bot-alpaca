@@ -312,6 +312,20 @@ async def export_trades_csv():
     )
 
 
+@app.get("/api/export/trades.xlsx")
+async def export_trades_xlsx():
+    """Download the audited closed-trade history as professional styled Excel workbook."""
+    if not bot_instance:
+        return JSONResponse(status_code=503, content={"error": "Bot subsystem not initialized"})
+    content = await asyncio.to_thread(bot_instance.auditor.export_trades_xlsx)
+    filename = f"trades_audit_{datetime.now(timezone.utc):%Y%m%d}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
 @app.get("/api/logs")
 async def get_logs():
     """Retrieve recent in-memory log entries for live terminal viewer."""

@@ -389,6 +389,184 @@ class PerformanceAuditor:
         writer.writerows(tuple(r) for r in rows)
         return buf.getvalue()
 
+    def export_trades_xlsx(self) -> bytes:
+        """Audited closed trades as a professional institutional Excel workbook (.xlsx)."""
+        from openpyxl import Workbook
+        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+        from openpyxl.utils import get_column_letter
+
+        summary = self.get_performance_summary()
+        with self._connect() as conn:
+            rows = conn.execute(
+                f"SELECT {', '.join(TRADE_COLUMNS)} FROM trade_history ORDER BY exit_date ASC, id ASC"
+            ).fetchall()
+
+        wb = Workbook()
+        ws = wb.active
+        ws.title = "Audited Trades"
+        ws.views.sheetView[0].showGridLines = True
+
+        thin_side = Side(border_style="thin", color="CBD5E1")
+        cell_border = Border(left=thin_side, right=thin_side, top=thin_side, bottom=thin_side)
+        soft_grid_side = Side(border_style="thin", color="E2E8F0")
+        row_border = Border(left=soft_grid_side, right=soft_grid_side, top=soft_grid_side, bottom=soft_grid_side)
+
+        # ----------------------------------------------------------- Row 1: Title
+        ws.merge_cells("A1:M1")
+        title_cell = ws["A1"]
+        title_cell.value = "QUANTBOT SYSTEMATIC ENGINE — AUDITED TRADE LEDGER"
+        title_cell.font = Font(name="Calibri", size=13, bold=True, color="FFFFFF")
+        title_cell.fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+        title_cell.alignment = Alignment(horizontal="center", vertical="center")
+        ws.row_dimensions[1].height = 36
+
+        # Fill background of merged title cells
+        for col_idx in range(1, 14):
+            ws.cell(row=1, column=col_idx).fill = PatternFill(start_color="0F172A", end_color="0F172A", fill_type="solid")
+
+        # ---------------------------------------------------- Rows 2-3: KPI Cards
+        ws.row_dimensions[2].height = 18
+        ws.row_dimensions[3].height = 26
+
+        def _style_card(c1, c2, r_lbl, r_val, label, value, val_color="0F172A"):
+            ws.merge_cells(start_row=r_lbl, start_column=c1, end_row=r_lbl, end_column=c2)
+            lbl_cell = ws.cell(row=r_lbl, column=c1, value=label)
+            lbl_cell.font = Font(name="Calibri", size=9, bold=True, color="64748B")
+            lbl_cell.alignment = Alignment(horizontal="center", vertical="center")
+            lbl_cell.fill = PatternFill(start_color="F1F5F9", end_color="F1F5F9", fill_type="solid")
+
+            ws.merge_cells(start_row=r_val, start_column=c1, end_row=r_val, end_column=c2)
+            v_cell = ws.cell(row=r_val, column=c1, value=value)
+            v_cell.font = Font(name="Calibri", size=12, bold=True, color=val_color)
+            v_cell.alignment = Alignment(horizontal="center", vertical="center")
+            v_cell.fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
+
+            for col in range(c1, c2 + 1):
+                ws.cell(row=r_lbl, column=col).border = cell_border
+                ws.cell(row=r_val, column=col).border = cell_border
+
+        pnl_val = summary.get("total_pnl", 0.0)
+        pnl_str = f"${pnl_val:+,.2f}" if pnl_val != 0 else "$0.00"
+        pnl_col = "059669" if pnl_val >= 0 else "DC2626"
+        wr_str = f"{summary['win_rate_pct']:.1f}%" if summary.get("win_rate_pct") is not None else "--"
+        pf_str = f"{summary['profit_factor']:.2f}" if summary.get("profit_factor") is not None else "--"
+        dd_str = f"{summary['max_drawdown_pct']:.2f}%" if summary.get("max_drawdown_pct") is not None else "0.00%"
+        trades_str = str(summary.get("total_trades", len(rows)))
+
+        _style_card(2, 3, 2, 3, "TOTAL P&L", pnl_str, pnl_col)
+        _style_card(4, 5, 2, 3, "WIN RATE", wr_str, "0F172A")
+        _style_card(6, 7, 2, 3, "PROFIT FACTOR", pf_str, "0F172A")
+        _style_card(8, 9, 2, 3, "MAX DRAWDOWN", dd_str, "DC2626" if summary.get("max_drawdown_pct", 0) > 0 else "0F172A")
+        _style_card(10, 11, 2, 3, "TOTAL TRADES", trades_str, "0F172A")
+
+        # Row 4: Spacer
+        ws.row_dimensions[4].height = 14
+
+        # ------------------------------------------------- Row 5: Table Header
+        headers = [
+            ("Trade #", "center"),
+            ("Ticker", "center"),
+            ("Tipo", "center"),
+            ("Fecha Entrada", "center"),
+            ("Fecha Salida", "center"),
+            ("Días", "center"),
+            ("Precio Entrada", "right"),
+            ("Precio Salida", "right"),
+            ("Acciones", "right"),
+            ("P&L ($)", "right"),
+            ("P&L (%)", "right"),
+            ("Motivo", "center"),
+            ("R-Múltiplo", "center"),
+        ]
+
+        ws.row_dimensions[5].height = 26
+        header_fill = PatternFill(start_color="1E293B", end_color="1E293B", fill_type="solid")
+        header_font = Font(name="Calibri", size=10, bold=True, color="FFFFFF")
+
+        for col_idx, (col_title, align_h) in enumerate(headers, start=1):
+            cell = ws.cell(row=5, column=col_idx, value=col_title)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal=align_h, vertical="center")
+            cell.border = cell_border
+
+        # ------------------------------------------------ Row 6+: Trade Rows
+        def _clean_date_str(s: Any) -> str:
+            if not s:
+                return "--"
+            try:
+                dt = datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+                return dt.strftime("%Y-%m-%d %H:%M")
+            except Exception:
+                return str(s)[:16]
+
+        def _days_held(e1_s: Any, e2_s: Any) -> float:
+            try:
+                d1 = datetime.fromisoformat(str(e1_s).replace("Z", "+00:00"))
+                d2 = datetime.fromisoformat(str(e2_s).replace("Z", "+00:00"))
+                return round(max(0.0, (d2 - d1).total_seconds() / 86400.0), 1)
+            except Exception:
+                return 0.0
+
+        win_fill = PatternFill(start_color="ECFDF5", end_color="ECFDF5", fill_type="solid")  # soft emerald
+        loss_fill = PatternFill(start_color="FEF2F2", end_color="FEF2F2", fill_type="solid")  # soft red
+        text_font = Font(name="Calibri", size=10, color="0F172A")
+        bold_win_font = Font(name="Calibri", size=10, bold=True, color="047857")
+        bold_loss_font = Font(name="Calibri", size=10, bold=True, color="B91C1C")
+
+        for idx, r in enumerate(rows, start=1):
+            row_num = idx + 5
+            ws.row_dimensions[row_num].height = 22
+            pnl_dollars = float(r["pnl_dollars"])
+            is_win = pnl_dollars >= 0
+            row_fill = win_fill if is_win else loss_fill
+            pnl_font = bold_win_font if is_win else bold_loss_font
+
+            r_mult = r["r_multiple"]
+            r_mult_str = f"{float(r_mult):+.2f} R" if r_mult is not None else "--"
+
+            values = [
+                (idx, "center", None, text_font),
+                (r["symbol"], "center", None, Font(name="Calibri", size=10, bold=True, color="0F172A")),
+                (r["side"].upper(), "center", None, text_font),
+                (_clean_date_str(r["entry_date"]), "center", None, text_font),
+                (_clean_date_str(r["exit_date"]), "center", None, text_font),
+                (_days_held(r["entry_date"], r["exit_date"]), "center", "0.0", text_font),
+                (float(r["entry_price"]), "right", "$#,##0.00", text_font),
+                (float(r["exit_price"]), "right", "$#,##0.00", text_font),
+                (float(r["shares"]), "right", "#,##0", text_font),
+                (pnl_dollars, "right", "$#,##0.00;($#,##0.00);\"$0.00\"", pnl_font),
+                (float(r["pnl_pct"]) / 100.0, "right", "+0.00%;-0.00%;0.00%", pnl_font),
+                (r["exit_reason"] or "MANUAL", "center", None, text_font),
+                (r_mult_str, "center", None, pnl_font if r_mult is not None else text_font),
+            ]
+
+            for col_idx, (val, align_h, num_fmt, font_style) in enumerate(values, start=1):
+                c = ws.cell(row=row_num, column=col_idx, value=val)
+                c.fill = row_fill
+                c.font = font_style
+                c.alignment = Alignment(horizontal=align_h, vertical="center")
+                c.border = row_border
+                if num_fmt:
+                    c.number_format = num_fmt
+
+        # Auto-fit column widths with safety margin
+        for col in ws.columns:
+            max_len = 0
+            col_letter = get_column_letter(col[0].column)
+            for cell in col:
+                # Skip title and card rows for column width auto-calculation
+                if cell.row < 5:
+                    continue
+                v = cell.value
+                if v is not None:
+                    max_len = max(max_len, len(str(v)))
+            ws.column_dimensions[col_letter].width = max(max_len + 4, 11)
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        return buf.getvalue()
+
 
 def _build_trade(entry: Any, exits: List[Any], initial_stop: Optional[float], manual: bool) -> Dict[str, Any]:
     """Aggregate (possibly partial / multiple) exit fills of one entry into record_closed_trade kwargs."""
